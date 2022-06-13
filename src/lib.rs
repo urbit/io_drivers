@@ -1,8 +1,12 @@
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::{
+    runtime,
+    sync::mpsc::{self, Receiver, Sender},
+};
 
-/// Last line of a request.
-const REQUEST_DELIM: &'static str = "==\n";
+/// Last line of a Message.
+const MESSAGE_DELIM: &'static str = "==\n";
 
+/// Either an IO request or an IO response.
 type Message = Vec<String>;
 
 /// Read incoming IO requests from stdin.
@@ -19,7 +23,7 @@ fn read_stdin(req_tx: Sender<Message>) {
                     break;
                 }
                 Ok(_) => {
-                    if line == REQUEST_DELIM {
+                    if line == MESSAGE_DELIM {
                         break;
                     } else {
                         req.push(line);
@@ -35,10 +39,19 @@ fn read_stdin(req_tx: Sender<Message>) {
     println!("stdin: exiting");
 }
 
+/// Schedule IO requests received from the stdin thread.
+async fn schedule_requests(mut req_rx: Receiver<Message>) {
+    while let Some(req) = req_rx.recv().await {
+        for line in req {
+            print!("io: {}", line);
+        }
+    }
+}
+
 /// Library entry point.
 pub fn run() {
     // TODO: decide if there's a better upper bound for number of unscheduled requests.
-    let (req_tx, mut req_rx): (Sender<Message>, Receiver<Message>) = mpsc::channel(1024);
+    let (req_tx, req_rx): (Sender<Message>, Receiver<Message>) = mpsc::channel(1024);
 
     // Read requests in a dedicated thread because tokio doesn't seem to implement async reads from
     // stdin.
@@ -46,11 +59,12 @@ pub fn run() {
         read_stdin(req_tx);
     });
 
-    while let Some(req) = req_rx.blocking_recv() {
-        for line in req {
-            print!("io: {}", line);
-        }
-    }
+    runtime::Builder::new_current_thread()
+        .enable_io()
+        .build()
+        .unwrap()
+        .block_on(schedule_requests(req_rx));
+    // TODO: decide Runtime::shutdown_timeout() should be used.
 
     stdin_thr.join().unwrap();
     println!("main: exiting");
