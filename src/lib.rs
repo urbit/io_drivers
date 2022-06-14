@@ -22,7 +22,7 @@ mod request {
 }
 
 /// Read incoming IO requests from some input source.
-async fn recv_requests(mut reader: impl AsyncReadExt + Unpin, req_tx: mpsc::Sender<Vec<u8>>) {
+async fn recv_requests(mut reader: impl AsyncReadExt + Unpin, req_tx: Sender<Vec<u8>>) {
     loop {
         // TODO: make explicit that the length is big endian (network byte order)
         let req_len = match reader.read_u64().await {
@@ -45,11 +45,18 @@ async fn recv_requests(mut reader: impl AsyncReadExt + Unpin, req_tx: mpsc::Send
     println!("input task exiting");
 }
 
-/// Write outgoing response to IO responses to some output source.
-async fn send_responses(
-    mut writer: impl AsyncWriteExt + Unpin,
-    mut resp_rx: mpsc::Receiver<Vec<u8>>,
-) {
+/// Schedule IO requests with the appropriate driver.
+async fn schedule_requests(mut req_rx: Receiver<Vec<u8>>, http_client_tx: Sender<Vec<u8>>) {
+    while let Some(req) = req_rx.recv().await {
+        match req[0] {
+            HTTP_CLIENT => http_client_tx.send(req).await.unwrap(),
+            _ => todo!("unknown request type"),
+        }
+    }
+}
+
+/// Read outgoing IO responses from the drivers and write the responses to some output source.
+async fn send_responses(mut writer: impl AsyncWriteExt + Unpin, mut resp_rx: Receiver<Vec<u8>>) {
     while let Some(mut resp) = resp_rx.recv().await {
         if let Err(_) = writer.write_all(&mut resp).await {
             todo!("handle error");
@@ -64,10 +71,6 @@ pub async fn run() {
     // TODO: decide if there's a better upper bound for number of unscheduled requests.
     const QUEUE_SIZE: usize = 32;
 
-    // input task -> scheduling task
-    let (req_tx, mut req_rx): Channel = mpsc::channel(QUEUE_SIZE);
-    let input_task = tokio::spawn(recv_requests(io::stdin(), req_tx));
-
     // driver tasks -> output task
     let (resp_tx, resp_rx): Channel = mpsc::channel(QUEUE_SIZE);
     let output_task = tokio::spawn(send_responses(io::stdout(), resp_rx));
@@ -76,16 +79,16 @@ pub async fn run() {
     let (http_client_tx, http_client_rx): Channel = mpsc::channel(QUEUE_SIZE);
     let http_client_task = tokio::spawn(http::client::run(http_client_rx, resp_tx));
 
-    while let Some(req) = req_rx.recv().await {
-        match req[0] {
-            HTTP_CLIENT => {}
-            _ => todo!("unknown request type"),
-        }
-    }
+    // input task -> scheduling task
+    let (req_tx, mut req_rx): Channel = mpsc::channel(QUEUE_SIZE);
+    let scheduling_task = tokio::spawn(schedule_requests(req_rx, http_client_tx));
+    let input_task = tokio::spawn(recv_requests(io::stdin(), req_tx));
 
     input_task.await.unwrap();
+    scheduling_task.await.unwrap();
     http_client_task.await.unwrap();
     output_task.await.unwrap();
+
     println!("scheduling task exiting");
 }
 
