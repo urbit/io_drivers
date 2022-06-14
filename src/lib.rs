@@ -42,11 +42,21 @@ async fn recv_requests(mut reader: impl AsyncReadExt + Unpin, req_tx: mpsc::Send
             Err(_) => todo!("handle error"),
         }
     }
-    println!("stdin: exiting");
+    println!("input task exiting");
 }
 
 /// Write outgoing response to IO responses to some output source.
-async fn send_responses(writer: impl AsyncWriteExt, resp_rx: mpsc::Receiver<Vec<u8>>) {}
+async fn send_responses(
+    mut writer: impl AsyncWriteExt + Unpin,
+    mut resp_rx: mpsc::Receiver<Vec<u8>>,
+) {
+    while let Some(mut resp) = resp_rx.recv().await {
+        if let Err(_) = writer.write_all(&mut resp).await {
+            todo!("handle error");
+        }
+    }
+    println!("output task exiting");
+}
 
 /// Library entry point.
 #[tokio::main(flavor = "current_thread")]
@@ -76,7 +86,7 @@ pub async fn run() {
     input_task.await.unwrap();
     http_client_task.await.unwrap();
     output_task.await.unwrap();
-    println!("main: exiting");
+    println!("scheduling task exiting");
 }
 
 #[cfg(test)]
