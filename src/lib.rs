@@ -1,6 +1,5 @@
 mod http;
 
-use request::tag::*;
 use std::marker::Unpin;
 use tokio::{
     self,
@@ -10,15 +9,21 @@ use tokio::{
 
 type Channel = (Sender<Vec<u8>>, Receiver<Vec<u8>>);
 
-/// IO request.
-mod request {
-    /// Tag identifying the type of a serialized IO request.
-    pub mod tag {
-        pub const HTTP_CLIENT: u8 = 0;
-    }
+/// Tag identifying the type of a serialized IO request.
+const HTTP_CLIENT: u8 = 0;
 
-    /// Marker trait to identify the implementing type as an IO request.
-    pub trait Request: TryFrom<Vec<u8>> {}
+/// IO request.
+trait Request {
+    type Error;
+
+    fn deserialize(req: Vec<u8>) -> Result<Self, Self::Error>
+    where
+        Self: Sized;
+}
+
+/// IO response.
+trait Response {
+    fn serialize(self) -> Vec<u8>;
 }
 
 /// Read incoming IO requests from some input source.
@@ -37,6 +42,7 @@ async fn recv_requests(mut reader: impl AsyncReadExt + Unpin, req_tx: Sender<Vec
         req.resize(req_len, 0);
         match reader.read_exact(&mut req).await {
             Ok(_) => {
+                // TODO: better error handling.
                 req_tx.send(req).await.unwrap();
             }
             Err(_) => todo!("handle error"),
@@ -49,7 +55,10 @@ async fn recv_requests(mut reader: impl AsyncReadExt + Unpin, req_tx: Sender<Vec
 async fn schedule_requests(mut req_rx: Receiver<Vec<u8>>, http_client_tx: Sender<Vec<u8>>) {
     while let Some(req) = req_rx.recv().await {
         match req[0] {
-            HTTP_CLIENT => http_client_tx.send(req).await.unwrap(),
+            HTTP_CLIENT => {
+                // TODO: better error handling.
+                http_client_tx.send(req).await.unwrap();
+            }
             _ => todo!("unknown request type"),
         }
     }
@@ -80,7 +89,7 @@ pub async fn run() {
     let http_client_task = tokio::spawn(http::client::run(http_client_rx, resp_tx));
 
     // input task -> scheduling task
-    let (req_tx, mut req_rx): Channel = mpsc::channel(QUEUE_SIZE);
+    let (req_tx, req_rx): Channel = mpsc::channel(QUEUE_SIZE);
     let scheduling_task = tokio::spawn(schedule_requests(req_rx, http_client_tx));
     let input_task = tokio::spawn(recv_requests(io::stdin(), req_tx));
 
@@ -106,8 +115,7 @@ mod tests {
             .block_on(async {
                 const REQ: [u8; 9] = [
                     // Length of payload. Big endian.
-                    0, 0, 0, 5,
-                    // Payload.
+                    0, 0, 0, 5, // Payload.
                     b'h', b'e', b'l', b'l', b'o',
                 ];
                 let reader = BufReader::new(&REQ[..]);
