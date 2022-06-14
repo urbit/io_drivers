@@ -25,9 +25,9 @@ mod request {
 async fn recv_requests(mut reader: impl AsyncReadExt + Unpin, req_tx: Sender<Vec<u8>>) {
     loop {
         // TODO: make explicit that the length is big endian (network byte order)
-        let req_len = match reader.read_u64().await {
+        let req_len = match reader.read_u32().await {
             Ok(0) => break,
-            Ok(req_len) => usize::try_from(req_len).expect("usize is smaller than u64"),
+            Ok(req_len) => usize::try_from(req_len).expect("usize is smaller than u32"),
             Err(err) => match err.kind() {
                 ErrorKind::UnexpectedEof => break,
                 _ => todo!(),
@@ -104,9 +104,10 @@ mod tests {
             .build()
             .unwrap()
             .block_on(async {
-                const REQ: [u8; 13] = [
+                const REQ: [u8; 9] = [
                     // Length of payload. Big endian.
-                    0, 0, 0, 0, 0, 0, 0, 5, // Payload.
+                    0, 0, 0, 5,
+                    // Payload.
                     b'h', b'e', b'l', b'l', b'o',
                 ];
                 let reader = BufReader::new(&REQ[..]);
