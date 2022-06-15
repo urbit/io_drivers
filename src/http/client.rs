@@ -1,38 +1,37 @@
-use crate::{Request, Response};
 use hyper::{
     body::{self, Bytes},
     client::{Client, HttpConnector},
     http::response::Parts,
     Body, Error as HyperError, Request as HyperRequest,
 };
+use noun::serdes::{Cue, Jam};
 use tokio::sync::mpsc::{Receiver, Sender};
 
-impl Request for HyperRequest<Body> {
+struct Request(HyperRequest<Body>);
+
+impl Cue for Request {
     type Error = Error;
 
-    fn deserialize(_req: Vec<u8>) -> Result<Self, Self::Error> {
-        Err(Self::Error::Deserialization)
+    fn cue(_jammed_val: Vec<u8>) -> Result<Self, Self::Error> {
+        Err(Self::Error::Cue)
     }
 }
 
-type HyperResponse = (Parts, Bytes);
+struct Response(Parts, Bytes);
 
-impl Response for HyperResponse {
-    fn serialize(self) -> Vec<u8> {
-        todo!()
+impl Jam for Response {
+    type Error = Error;
+
+    fn jam(self) -> Result<Vec<u8>, Self::Error> {
+        Err(Self::Error::Jam)
     }
 }
 
-/// HTTP client error.
-pub enum Error {
-    Deserialization,
+#[derive(Debug)]
+enum Error {
+    Cue,
     Hyper(HyperError),
-}
-
-impl Response for Error {
-    fn serialize(self) -> Vec<u8> {
-        todo!()
-    }
+    Jam,
 }
 
 impl From<HyperError> for Error {
@@ -41,15 +40,23 @@ impl From<HyperError> for Error {
     }
 }
 
+impl Jam for Error {
+    type Error = Self;
+
+    fn jam(self) -> Result<Vec<u8>, Self::Error> {
+        Err(Self::Jam)
+    }
+}
+
 /// Send an HTTP request and receive its response.
 async fn send_request(client: Client<HttpConnector>, req: Vec<u8>) -> Result<Vec<u8>, Error> {
-    let req = HyperRequest::deserialize(req)?;
-    let (parts, body) = client.request(req).await?.into_parts();
+    let req = Request::cue(req)?;
+    let (parts, body) = client.request(req.0).await?.into_parts();
 
     // Wait for the entire response body to come in.
     let body = body::to_bytes(body).await?;
 
-    let resp = (parts, body).serialize();
+    let resp = Response(parts, body).jam()?;
     Ok(resp)
 }
 
@@ -63,7 +70,7 @@ pub async fn run(mut req_rx: Receiver<Vec<u8>>, resp_tx: Sender<Vec<u8>>) {
         tokio::spawn(async move {
             let resp = match send_request(client_clone, req).await {
                 Ok(resp) => resp,
-                Err(err) => err.serialize(),
+                Err(err) => err.jam().expect("failed to jam error"),
             };
             // TODO: better error handling.
             resp_tx_clone.send(resp).await.unwrap();

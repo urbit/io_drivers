@@ -7,24 +7,10 @@ use tokio::{
     sync::mpsc::{self, Receiver, Sender},
 };
 
-type Channel = (Sender<Vec<u8>>, Receiver<Vec<u8>>);
+type Channel<T> = (Sender<T>, Receiver<T>);
 
 /// Tag identifying the type of a serialized IO request.
 const HTTP_CLIENT: u8 = 0;
-
-/// IO request.
-trait Request {
-    type Error;
-
-    fn deserialize(req: Vec<u8>) -> Result<Self, Self::Error>
-    where
-        Self: Sized;
-}
-
-/// IO response.
-trait Response {
-    fn serialize(self) -> Vec<u8>;
-}
 
 /// Read incoming IO requests from some input source.
 async fn recv_requests(mut reader: impl AsyncReadExt + Unpin, req_tx: Sender<Vec<u8>>) {
@@ -81,15 +67,15 @@ pub async fn run() {
     const QUEUE_SIZE: usize = 32;
 
     // driver tasks -> output task
-    let (resp_tx, resp_rx): Channel = mpsc::channel(QUEUE_SIZE);
+    let (resp_tx, resp_rx): Channel<Vec<u8>> = mpsc::channel(QUEUE_SIZE);
     let output_task = tokio::spawn(send_responses(io::stdout(), resp_rx));
 
     // scheduling task -> http client driver task
-    let (http_client_tx, http_client_rx): Channel = mpsc::channel(QUEUE_SIZE);
+    let (http_client_tx, http_client_rx): Channel<Vec<u8>> = mpsc::channel(QUEUE_SIZE);
     let http_client_task = tokio::spawn(http::client::run(http_client_rx, resp_tx));
 
     // input task -> scheduling task
-    let (req_tx, req_rx): Channel = mpsc::channel(QUEUE_SIZE);
+    let (req_tx, req_rx): Channel<Vec<u8>> = mpsc::channel(QUEUE_SIZE);
     let scheduling_task = tokio::spawn(schedule_requests(req_rx, http_client_tx));
     let input_task = tokio::spawn(recv_requests(io::stdin(), req_tx));
 

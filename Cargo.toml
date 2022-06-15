@@ -5,4 +5,5 @@ edition = "2021"
 
 [dependencies]
 hyper = { version = "0.14", features = ["full"] }
+noun = { path = "../noun" }
 tokio = { version = "1", features = ["full"] }
