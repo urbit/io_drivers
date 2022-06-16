@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bitstream-io = "1.2"
 hyper = { version = "0.14", features = ["full"] }
 noun = { path = "../noun" }
 tokio = { version = "1", features = ["full"] }

@@ -4,6 +4,7 @@ use hyper::{
     http::response::Parts,
     Body, Error as HyperError, Request as HyperRequest,
 };
+use bitstream_io::BitReader;
 use noun::{r#enum::Noun, Cue, FromNoun, IntoNoun, Jam};
 use tokio::sync::mpsc::{Receiver, Sender};
 
@@ -54,23 +55,42 @@ impl IntoNoun for Error {
 }
 
 /// Send an HTTP request and receive its response.
-async fn send_request(client: Client<HttpConnector>, req: Vec<u8>) -> Result<Vec<u8>, Error> {
-    // TODO: better error handling.
-    let req_noun = Noun::cue(req).map_err(|_| Error::Cue)?;
-    // TODO: better error handling.
-    let req = Request::from_noun(req_noun).map_err(|_| Error::FromNoun)?;
-    let (parts, body) = client.request(req.0).await?.into_parts();
+async fn send_request(client: Client<HttpConnector>, req: Vec<u8>) -> Vec<u8> {
+    /*
+    let req_noun = Noun::cue(req);
+    if let Err(_) = req_noun {
+        todo!("handle error");
+    }
+
+    let req = Request::from_noun(req_noun.unwrap());
+    if let Err(_) = req {
+        todo!("handle error");
+    }
+
+    let resp = client.request(req.unwrap().0).await;
+    if let Err(_) = resp {
+        todo!("handle error");
+    }
+    let (parts, body) = resp.unwrap().into_parts();
 
     // Wait for the entire response body to come in.
-    let body = body::to_bytes(body).await?;
+    let body = body::to_bytes(body).await;
+    if let Err(_) = body {
+        todo!("handle error");
+    }
 
-    // TODO: better error handling.
-    let resp = Response(parts, body)
-        .into_noun()
-        .map_err(|_| Error::IntoNoun)?
-        .jam()
-        .map_err(|_| Error::Jam)?;
-    Ok(resp)
+    let resp_noun = Response(parts, body.unwrap()).into_noun();
+    if let Err(_) = resp_noun {
+        todo!("handle error");
+    }
+
+    let resp_noun = resp_noun.unwrap().jam();
+    if let Err(_) = resp_noun {
+        todo!("handle error");
+    }
+    */
+
+    req
 }
 
 /// HTTP client driver entry point.
@@ -81,10 +101,7 @@ pub async fn run(mut req_rx: Receiver<Vec<u8>>, resp_tx: Sender<Vec<u8>>) {
         let client_clone = client.clone();
         let resp_tx_clone = resp_tx.clone();
         tokio::spawn(async move {
-            let resp = match send_request(client_clone, req).await {
-                Ok(resp) => resp,
-                Err(err) => err.into_noun().expect("into noun").jam().expect("jam"),
-            };
+            let resp = send_request(client_clone, req).await;
             // TODO: better error handling.
             resp_tx_clone.send(resp).await.unwrap();
         });
