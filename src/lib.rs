@@ -9,6 +9,9 @@ use tokio::{
 
 type Channel<T> = (Sender<T>, Receiver<T>);
 
+/// Endianness of requests.
+type Endianness = bitstream_io::LittleEndian;
+
 /// Tag identifying the type of a serialized IO request.
 const HTTP_CLIENT: u8 = 0;
 

@@ -1,10 +1,11 @@
+use crate::Endianness;
+use bitstream_io::{BitReader, BitWriter};
 use hyper::{
     body::{self, Bytes},
     client::{Client, HttpConnector},
     http::response::Parts,
     Body, Error as HyperError, Request as HyperRequest,
 };
-use bitstream_io::BitReader;
 use noun::{r#enum::Noun, Cue, FromNoun, IntoNoun, Jam};
 use tokio::sync::mpsc::{Receiver, Sender};
 
@@ -32,11 +33,11 @@ impl IntoNoun for Response {
 
 #[derive(Debug)]
 enum Error {
-    Cue,
-    FromNoun,
+    //Cue,
+    //FromNoun,
     Hyper(HyperError),
-    IntoNoun,
-    Jam,
+    //IntoNoun,
+    //Jam,
 }
 
 impl From<HyperError> for Error {
@@ -56,8 +57,9 @@ impl IntoNoun for Error {
 
 /// Send an HTTP request and receive its response.
 async fn send_request(client: Client<HttpConnector>, req: Vec<u8>) -> Vec<u8> {
-    /*
-    let req_noun = Noun::cue(req);
+    let bitstream: BitReader<&[_], Endianness> = BitReader::new(&req[..]);
+
+    let req_noun = Noun::cue(bitstream);
     if let Err(_) = req_noun {
         todo!("handle error");
     }
@@ -84,13 +86,14 @@ async fn send_request(client: Client<HttpConnector>, req: Vec<u8>) -> Vec<u8> {
         todo!("handle error");
     }
 
-    let resp_noun = resp_noun.unwrap().jam();
+    let resp = Vec::new();
+    let mut bitstream: BitWriter<Vec<_>, Endianness> = BitWriter::new(resp);
+    let resp_noun = resp_noun.unwrap().jam(&mut bitstream);
     if let Err(_) = resp_noun {
         todo!("handle error");
     }
-    */
 
-    req
+    bitstream.into_writer()
 }
 
 /// HTTP client driver entry point.
