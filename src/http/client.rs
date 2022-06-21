@@ -6,27 +6,25 @@ use hyper::{
     http::response::Parts,
     Body, Error as HyperError, Request as HyperRequest,
 };
-use noun::{r#enum::Noun, Cue, FromNoun, IntoNoun, Jam};
+use noun::{
+    serdes::{Cue, Jam},
+    types::{atom::Atom, cell::Cell, noun::Noun},
+    FromNoun, IntoNoun,
+};
 use tokio::sync::mpsc::{Receiver, Sender};
 
 struct Request(HyperRequest<Body>);
 
-impl FromNoun for Request {
-    type Error = Error;
-    type Noun = Noun;
-
-    fn from_noun(_noun: Self::Noun) -> Result<Self, Self::Error> {
+impl FromNoun<Atom, Cell, Noun> for Request {
+    fn from_noun(_noun: Noun) -> Result<Self, ()> {
         todo!()
     }
 }
 
 struct Response(Parts, Bytes);
 
-impl IntoNoun for Response {
-    type Error = Error;
-    type Noun = Noun;
-
-    fn into_noun(self) -> Result<Self::Noun, Self::Error> {
+impl IntoNoun<Atom, Cell, Noun> for Response {
+    fn into_noun(self) -> Result<Noun, ()> {
         todo!()
     }
 }
@@ -46,11 +44,8 @@ impl From<HyperError> for Error {
     }
 }
 
-impl IntoNoun for Error {
-    type Error = Self;
-    type Noun = Noun;
-
-    fn into_noun(self) -> Result<Self::Noun, Self::Error> {
+impl IntoNoun<Atom, Cell, Noun> for Error {
+    fn into_noun(self) -> Result<Noun, ()> {
         todo!()
     }
 }
@@ -59,29 +54,37 @@ impl IntoNoun for Error {
 async fn send_request(client: Client<HttpConnector>, req: Vec<u8>) -> Vec<u8> {
     let bitstream: BitReader<&[_], Endianness> = BitReader::new(&req[..]);
 
-    let req_noun = Noun::cue(bitstream);
-    if let Err(_) = req_noun {
-        todo!("handle error");
-    }
+    // Parse request.
+    let req = {
+        let req_noun = Noun::cue(bitstream);
+        if let Err(_) = req_noun {
+            todo!("handle error");
+        }
 
-    let req = Request::from_noun(req_noun.unwrap());
-    if let Err(_) = req {
-        todo!("handle error");
-    }
+        let req = Request::from_noun(req_noun.unwrap());
+        if let Err(_) = req {
+            todo!("handle error");
+        }
+        req.unwrap()
+    };
 
-    let resp = client.request(req.unwrap().0).await;
-    if let Err(_) = resp {
-        todo!("handle error");
-    }
-    let (parts, body) = resp.unwrap().into_parts();
+    // Send request and receive response.
+    let (resp_parts, resp_body) = {
+        let resp = client.request(req.0).await;
+        if let Err(_) = resp {
+            todo!("handle error");
+        }
+        let (parts, body) = resp.unwrap().into_parts();
 
-    // Wait for the entire response body to come in.
-    let body = body::to_bytes(body).await;
-    if let Err(_) = body {
-        todo!("handle error");
-    }
+        // Wait for the entire response body to come in.
+        let body = body::to_bytes(body).await;
+        if let Err(_) = body {
+            todo!("handle error");
+        }
+        (parts, body.unwrap())
+    };
 
-    let resp_noun = Response(parts, body.unwrap()).into_noun();
+    let resp_noun = Response(resp_parts, resp_body).into_noun();
     if let Err(_) = resp_noun {
         todo!("handle error");
     }
