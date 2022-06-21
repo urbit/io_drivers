@@ -112,5 +112,5 @@ pub async fn run(mut req_rx: Receiver<Vec<u8>>, resp_tx: Sender<Vec<u8>>) {
             resp_tx_clone.send(resp).await.unwrap();
         });
     }
-    println!("http client task exiting");
+    eprintln!("http client task exiting");
 }

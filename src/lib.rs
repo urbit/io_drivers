@@ -37,7 +37,7 @@ async fn recv_requests(mut reader: impl AsyncReadExt + Unpin, req_tx: Sender<Vec
             Err(_) => todo!("handle error"),
         }
     }
-    println!("input task exiting");
+    eprintln!("input task exiting");
 }
 
 /// Schedule IO requests with the appropriate driver.
@@ -60,7 +60,7 @@ async fn send_responses(mut writer: impl AsyncWriteExt + Unpin, mut resp_rx: Rec
             todo!("handle error");
         }
     }
-    println!("output task exiting");
+    eprintln!("output task exiting");
 }
 
 /// Library entry point.
@@ -87,7 +87,7 @@ pub async fn run() {
     http_client_task.await.unwrap();
     output_task.await.unwrap();
 
-    println!("scheduling task exiting");
+    eprintln!("scheduling task exiting");
 }
 
 #[cfg(test)]
