@@ -9,21 +9,52 @@ use hyper::{
 use noun::{
     serdes::{Cue, Jam},
     types::{atom::Atom, cell::Cell, noun::Noun},
-    Cell as _, FromNoun, IntoNoun, Noun as _,
+    Atom as _, Cell as _, FromNoun, IntoNoun, Noun as _,
 };
 use std::{future::Future, mem::size_of};
 use tokio::sync::mpsc::{Receiver, Sender};
 
-struct Request(HyperRequest<Body>);
+struct Request {
+    req_num: u64,
+    req: HyperRequest<Body>,
+}
 
 impl FromNoun<Atom, Cell, Noun> for Request {
-    fn from_noun_ref(req: &Noun) -> Result<Self, ()> {
-        let (req_num, req) = req.as_cell()?.as_parts();
-        println!("peter: req_num={:?}", req_num.as_atom()?);
-        todo!("finish")
+    fn from_noun_ref(req_noun: &Noun) -> Result<Self, ()> {
+        let (req_num, req_noun) = req_noun.as_cell()?.as_parts();
+        let req_num = req_num.as_atom()?.as_u64()?;
+
+        let mut req = HyperRequest::builder();
+
+        let (method, req_noun) = req_noun.as_cell()?.as_parts();
+        req = req.method(method.as_atom()?.as_str()?);
+
+        let (uri, req_noun) = req_noun.as_cell()?.as_parts();
+        req = req.uri(uri.as_atom()?.as_str()?);
+
+        let (mut headers, body) = req_noun.as_cell()?.as_parts();
+
+        while let Ok(cell) = headers.as_cell() {
+            let header = cell.head();
+            headers = cell.tail();
+
+            let (key, val) = header.as_cell()?.as_parts();
+            let (key, val) = (key.as_atom()?.as_str()?, val.as_atom()?.as_str()?);
+            req = req.header(key, val);
+        }
+
+        let body = if let Ok(body) = body.as_cell() {
+            let (_body_len, body) = body.as_parts();
+            Body::from(String::from(body.as_atom()?.as_str()?))
+        } else {
+            Body::empty()
+        };
+
+        let req = req.body(body).map_err(|_| ())?;
+        Ok(Self { req_num, req })
     }
 
-    fn from_noun(req: Noun) -> Result<Self, ()> {
+    fn from_noun(_req: Noun) -> Result<Self, ()> {
         Err(())
     }
 }
@@ -69,7 +100,7 @@ impl IntoNoun<Atom, Cell, Noun> for Error {
 async fn send_http_request(client: Client<HttpConnector>, req: Request) -> Result<Vec<u8>, ()> {
     // Send request and receive response.
     let (resp_parts, resp_body) = {
-        let resp = client.request(req.0).await.map_err(|_| ())?;
+        let resp = client.request(req.req).await.map_err(|_| ())?;
         let (parts, body) = resp.into_parts();
 
         // Wait for the entire response body to come in.
