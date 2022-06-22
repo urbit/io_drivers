@@ -1,4 +1,4 @@
-use crate::Endianness;
+use crate::{Endianness, RequestTag};
 use bitstream_io::{BitReader, BitWriter};
 use hyper::{
     body::{self, Bytes},
@@ -9,8 +9,9 @@ use hyper::{
 use noun::{
     serdes::{Cue, Jam},
     types::{atom::Atom, cell::Cell, noun::Noun},
-    FromNoun, IntoNoun,
+    Cell as _, FromNoun, IntoNoun, Noun as _,
 };
+use std::mem::size_of;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 struct Request(HyperRequest<Body>);
@@ -51,53 +52,54 @@ impl IntoNoun<Atom, Cell, Noun> for Error {
 }
 
 /// Send an HTTP request and receive its response.
-async fn send_request(client: Client<HttpConnector>, req: Vec<u8>) -> Vec<u8> {
-    // First byte is the request type, which should be skipped.
-    let bitstream: BitReader<&[_], Endianness> = BitReader::new(&req[1..]);
-
+async fn send_http_request(client: Client<HttpConnector>, req: Noun) -> Result<Vec<u8>, ()> {
     // Parse request.
-    let req = {
-        let req_noun = Noun::cue(bitstream);
-        if let Err(_) = req_noun {
-            todo!("handle error");
-        }
-
-        let req = Request::from_noun(req_noun.unwrap());
-        if let Err(_) = req {
-            todo!("handle error");
-        }
-        req.unwrap()
-    };
+    let req = Request::from_noun(req)?;
 
     // Send request and receive response.
     let (resp_parts, resp_body) = {
-        let resp = client.request(req.0).await;
-        if let Err(_) = resp {
-            todo!("handle error");
-        }
-        let (parts, body) = resp.unwrap().into_parts();
+        let resp = client.request(req.0).await.map_err(|_| ())?;
+        let (parts, body) = resp.into_parts();
 
         // Wait for the entire response body to come in.
-        let body = body::to_bytes(body).await;
-        if let Err(_) = body {
-            todo!("handle error");
-        }
-        (parts, body.unwrap())
+        let body = body::to_bytes(body).await.map_err(|_| ())?;
+        (parts, body)
     };
 
-    let resp_noun = Response(resp_parts, resp_body).into_noun();
-    if let Err(_) = resp_noun {
-        todo!("handle error");
-    }
+    let resp_noun = Response(resp_parts, resp_body).into_noun()?;
 
     let resp = Vec::new();
     let mut bitstream: BitWriter<Vec<_>, Endianness> = BitWriter::new(resp);
-    let resp_noun = resp_noun.unwrap().jam(&mut bitstream);
-    if let Err(_) = resp_noun {
-        todo!("handle error");
-    }
+    resp_noun.jam(&mut bitstream)?;
 
-    bitstream.into_writer()
+    let resp = bitstream.into_writer();
+    Ok(resp)
+}
+
+async fn handle_io_request(
+    _client: Client<HttpConnector>,
+    req: Vec<u8>,
+    _resp_tx: Sender<Vec<u8>>,
+) -> Result<(), ()> {
+    let (tag, req_noun) = {
+        // First byte is the request type, which should be skipped.
+        let start = size_of::<RequestTag>();
+        let bitstream: BitReader<&[_], Endianness> = BitReader::new(&req[start..]);
+
+        let req_noun = Noun::cue(bitstream)?;
+        req_noun.into_cell().map_err(|_| ())?.into_parts()
+    };
+
+    let tag = tag.as_atom()?;
+    if tag == "request" {
+        println!("rust: send HTTP request");
+    } else if tag == "cancel-request" {
+        println!("rust: cancel HTTP request");
+    } else {
+        todo!("handle unknown type");
+    }
+    //resp_tx.send(resp).await.unwrap();
+    Ok(())
 }
 
 /// HTTP client driver entry point.
@@ -107,11 +109,6 @@ pub async fn run(mut req_rx: Receiver<Vec<u8>>, resp_tx: Sender<Vec<u8>>) {
     while let Some(req) = req_rx.recv().await {
         let client_clone = client.clone();
         let resp_tx_clone = resp_tx.clone();
-        tokio::spawn(async move {
-            let resp = send_request(client_clone, req).await;
-            // TODO: better error handling.
-            resp_tx_clone.send(resp).await.unwrap();
-        });
+        tokio::spawn(handle_io_request(client_clone, req, resp_tx_clone));
     }
-    eprintln!("http client task exiting");
 }

@@ -12,11 +12,13 @@ type Channel<T> = (Sender<T>, Receiver<T>);
 /// Endianness of requests.
 type Endianness = bitstream_io::LittleEndian;
 
+type RequestTag = u8;
+
 /// Tag identifying the type of a serialized IO request.
-const HTTP_CLIENT: u8 = 0;
+const HTTP_CLIENT: RequestTag = 0;
 
 /// Read incoming IO requests from some input source.
-async fn recv_requests(mut reader: impl AsyncReadExt + Unpin, req_tx: Sender<Vec<u8>>) {
+async fn recv_io_requests(mut reader: impl AsyncReadExt + Unpin, req_tx: Sender<Vec<u8>>) {
     loop {
         let req_len = match reader.read_u64_le().await {
             Ok(0) => break,
@@ -36,30 +38,31 @@ async fn recv_requests(mut reader: impl AsyncReadExt + Unpin, req_tx: Sender<Vec
             Err(_) => todo!("handle error"),
         }
     }
-    eprintln!("input task exiting");
 }
 
 /// Schedule IO requests with the appropriate driver.
-async fn schedule_requests(mut req_rx: Receiver<Vec<u8>>, http_client_tx: Sender<Vec<u8>>) {
+async fn schedule_io_requests(mut req_rx: Receiver<Vec<u8>>, http_client_tx: Sender<Vec<u8>>) {
     while let Some(req) = req_rx.recv().await {
         match req[0] {
             HTTP_CLIENT => {
                 // TODO: better error handling.
                 http_client_tx.send(req).await.unwrap();
             }
-            _ => todo!("unknown request type"),
+            _ => {
+                println!("req={}", String::from_utf8(req).unwrap());
+                //todo!("unknown request type");
+            }
         }
     }
 }
 
 /// Read outgoing IO responses from the drivers and write the responses to some output source.
-async fn send_responses(mut writer: impl AsyncWriteExt + Unpin, mut resp_rx: Receiver<Vec<u8>>) {
+async fn send_io_responses(mut writer: impl AsyncWriteExt + Unpin, mut resp_rx: Receiver<Vec<u8>>) {
     while let Some(mut resp) = resp_rx.recv().await {
         if let Err(_) = writer.write_all(&mut resp).await {
             todo!("handle error");
         }
     }
-    eprintln!("output task exiting");
 }
 
 /// Library entry point.
@@ -70,7 +73,7 @@ pub async fn run() {
 
     // driver tasks -> output task
     let (resp_tx, resp_rx): Channel<Vec<u8>> = mpsc::channel(QUEUE_SIZE);
-    let output_task = tokio::spawn(send_responses(io::stdout(), resp_rx));
+    let output_task = tokio::spawn(send_io_responses(io::stdout(), resp_rx));
 
     // scheduling task -> http client driver task
     let (http_client_tx, http_client_rx): Channel<Vec<u8>> = mpsc::channel(QUEUE_SIZE);
@@ -78,15 +81,13 @@ pub async fn run() {
 
     // input task -> scheduling task
     let (req_tx, req_rx): Channel<Vec<u8>> = mpsc::channel(QUEUE_SIZE);
-    let scheduling_task = tokio::spawn(schedule_requests(req_rx, http_client_tx));
-    let input_task = tokio::spawn(recv_requests(io::stdin(), req_tx));
+    let scheduling_task = tokio::spawn(schedule_io_requests(req_rx, http_client_tx));
+    let input_task = tokio::spawn(recv_io_requests(io::stdin(), req_tx));
 
     input_task.await.unwrap();
     scheduling_task.await.unwrap();
     http_client_task.await.unwrap();
     output_task.await.unwrap();
-
-    eprintln!("scheduling task exiting");
 }
 
 #[cfg(test)]
