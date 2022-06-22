@@ -52,7 +52,8 @@ impl IntoNoun<Atom, Cell, Noun> for Error {
 
 /// Send an HTTP request and receive its response.
 async fn send_request(client: Client<HttpConnector>, req: Vec<u8>) -> Vec<u8> {
-    let bitstream: BitReader<&[_], Endianness> = BitReader::new(&req[..]);
+    // First byte is the request type, which should be skipped.
+    let bitstream: BitReader<&[_], Endianness> = BitReader::new(&req[1..]);
 
     // Parse request.
     let req = {

@@ -18,9 +18,9 @@ const HTTP_CLIENT: u8 = 0;
 /// Read incoming IO requests from some input source.
 async fn recv_requests(mut reader: impl AsyncReadExt + Unpin, req_tx: Sender<Vec<u8>>) {
     loop {
-        let req_len = match reader.read_u32_le().await {
+        let req_len = match reader.read_u64_le().await {
             Ok(0) => break,
-            Ok(req_len) => usize::try_from(req_len).expect("usize is smaller than u32"),
+            Ok(req_len) => usize::try_from(req_len).expect("usize is smaller than u64"),
             Err(err) => match err.kind() {
                 ErrorKind::UnexpectedEof => break,
                 _ => todo!(),
