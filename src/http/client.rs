@@ -11,20 +11,30 @@ use noun::{
     types::{atom::Atom, cell::Cell, noun::Noun},
     Cell as _, FromNoun, IntoNoun, Noun as _,
 };
-use std::mem::size_of;
+use std::{future::Future, mem::size_of};
 use tokio::sync::mpsc::{Receiver, Sender};
 
 struct Request(HyperRequest<Body>);
 
 impl FromNoun<Atom, Cell, Noun> for Request {
-    fn from_noun(_noun: Noun) -> Result<Self, ()> {
-        todo!()
+    fn from_noun_ref(req: &Noun) -> Result<Self, ()> {
+        let (req_num, req) = req.as_cell()?.as_parts();
+        println!("peter: req_num={:?}", req_num.as_atom()?);
+        todo!("finish")
+    }
+
+    fn from_noun(req: Noun) -> Result<Self, ()> {
+        Err(())
     }
 }
 
 struct Response(Parts, Bytes);
 
 impl IntoNoun<Atom, Cell, Noun> for Response {
+    fn as_noun(&self) -> Result<Noun, ()> {
+        todo!()
+    }
+
     fn into_noun(self) -> Result<Noun, ()> {
         todo!()
     }
@@ -46,16 +56,17 @@ impl From<HyperError> for Error {
 }
 
 impl IntoNoun<Atom, Cell, Noun> for Error {
+    fn as_noun(&self) -> Result<Noun, ()> {
+        todo!()
+    }
+
     fn into_noun(self) -> Result<Noun, ()> {
         todo!()
     }
 }
 
 /// Send an HTTP request and receive its response.
-async fn send_http_request(client: Client<HttpConnector>, req: Noun) -> Result<Vec<u8>, ()> {
-    // Parse request.
-    let req = Request::from_noun(req)?;
-
+async fn send_http_request(client: Client<HttpConnector>, req: Request) -> Result<Vec<u8>, ()> {
     // Send request and receive response.
     let (resp_parts, resp_body) = {
         let resp = client.request(req.0).await.map_err(|_| ())?;
@@ -76,30 +87,29 @@ async fn send_http_request(client: Client<HttpConnector>, req: Noun) -> Result<V
     Ok(resp)
 }
 
-async fn handle_io_request(
-    _client: Client<HttpConnector>,
+/// This has to be synchronous because Noun is not Send.
+fn handle_io_request(
+    client: Client<HttpConnector>,
     req: Vec<u8>,
     _resp_tx: Sender<Vec<u8>>,
-) -> Result<(), ()> {
+) -> Result<impl Future<Output = Result<Vec<u8>, ()>>, ()> {
     let (tag, req_noun) = {
         // First byte is the request type, which should be skipped.
         let start = size_of::<RequestTag>();
         let bitstream: BitReader<&[_], Endianness> = BitReader::new(&req[start..]);
-
-        let req_noun = Noun::cue(bitstream)?;
-        req_noun.into_cell().map_err(|_| ())?.into_parts()
+        let noun = Noun::cue(bitstream)?;
+        noun.into_cell().map_err(|_| ())?.into_parts()
     };
 
     let tag = tag.as_atom()?;
     if tag == "request" {
-        println!("rust: send HTTP request");
+        let req = Request::from_noun_ref(&req_noun)?;
+        return Ok(send_http_request(client, req));
     } else if tag == "cancel-request" {
-        println!("rust: cancel HTTP request");
+        todo!("cancel request");
     } else {
-        todo!("handle unknown type");
+        return Err(());
     }
-    //resp_tx.send(resp).await.unwrap();
-    Ok(())
 }
 
 /// HTTP client driver entry point.
@@ -109,6 +119,6 @@ pub async fn run(mut req_rx: Receiver<Vec<u8>>, resp_tx: Sender<Vec<u8>>) {
     while let Some(req) = req_rx.recv().await {
         let client_clone = client.clone();
         let resp_tx_clone = resp_tx.clone();
-        tokio::spawn(handle_io_request(client_clone, req, resp_tx_clone));
+        tokio::spawn(async move { handle_io_request(client_clone, req, resp_tx_clone)?.await });
     }
 }
