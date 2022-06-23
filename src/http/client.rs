@@ -6,13 +6,17 @@ use hyper::{
     http::response::Parts,
     Body, Error as HyperError, Request as HyperRequest,
 };
+use hyper_rustls::{ConfigBuilderExt, HttpsConnector, HttpsConnectorBuilder};
 use noun::{
     serdes::{Cue, Jam},
     types::{atom::Atom, cell::Cell, noun::Noun},
     Atom as _, Cell as _, FromNoun, IntoNoun, Noun as _,
 };
+use rustls::ClientConfig;
 use std::{future::Future, mem::size_of};
 use tokio::sync::mpsc::{Receiver, Sender};
+
+type HyperClient = Client<HttpsConnector<HttpConnector>, Body>;
 
 struct Request {
     req_num: u64,
@@ -97,7 +101,7 @@ impl IntoNoun<Atom, Cell, Noun> for Error {
 }
 
 /// Send an HTTP request and receive its response.
-async fn send_http_request(client: Client<HttpConnector>, req: Request) -> Result<Vec<u8>, ()> {
+async fn send_http_request(client: HyperClient, req: Request) -> Result<Vec<u8>, ()> {
     // Send request and receive response.
     let (resp_parts, resp_body) = {
         let resp = client.request(req.req).await.map_err(|_| ())?;
@@ -120,7 +124,7 @@ async fn send_http_request(client: Client<HttpConnector>, req: Request) -> Resul
 
 /// This has to be synchronous because Noun is not Send.
 fn handle_io_request(
-    client: Client<HttpConnector>,
+    client: HyperClient,
     req: Vec<u8>,
     _resp_tx: Sender<Vec<u8>>,
 ) -> Result<impl Future<Output = Result<Vec<u8>, ()>>, ()> {
@@ -145,7 +149,20 @@ fn handle_io_request(
 
 /// HTTP client driver entry point.
 pub async fn run(mut req_rx: Receiver<Vec<u8>>, resp_tx: Sender<Vec<u8>>) {
-    let client = Client::new();
+    let client: HyperClient = {
+        let tls = ClientConfig::builder()
+            .with_safe_defaults()
+            .with_native_roots()
+            .with_no_client_auth();
+
+        let https = HttpsConnectorBuilder::new()
+            .with_tls_config(tls)
+            .https_or_http()
+            .enable_http1()
+            .build();
+
+        Client::builder().build(https)
+    };
 
     while let Some(req) = req_rx.recv().await {
         let client_clone = client.clone();
