@@ -96,21 +96,20 @@ mod tests {
     use tokio::{io::BufReader, runtime};
 
     #[test]
-    fn recv_requests() {
+    fn recv_io_requests() {
         runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap()
             .block_on(async {
-                const REQ: [u8; 9] = [
-                    // Length of payload. Big endian.
-                    0, 0, 0, 5, // Payload.
+                const REQ: [u8; 13] = [
+                    5, 0, 0, 0, 0, 0, 0, 0, // Payload.
                     b'h', b'e', b'l', b'l', b'o',
                 ];
                 let reader = BufReader::new(&REQ[..]);
                 let (req_tx, mut req_rx): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = mpsc::channel(8);
 
-                tokio::spawn(super::recv_requests(reader, req_tx));
+                tokio::spawn(super::recv_io_requests(reader, req_tx));
 
                 let req = req_rx.recv().await.unwrap();
                 let req = String::from_utf8(req).unwrap();
