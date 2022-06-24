@@ -1,5 +1,5 @@
 use crate::{Endianness, RequestTag};
-use bitstream_io::{BitReader, BitWriter};
+use bitstream_io::BitReader;
 use hyper::{
     body::{self, Bytes},
     client::{Client, HttpConnector},
@@ -114,11 +114,7 @@ async fn send_http_request(client: HyperClient, req: Request) -> Result<Vec<u8>,
 
     let resp_noun = Response(resp_parts, resp_body).into_noun()?;
 
-    let resp = Vec::new();
-    let mut bitstream: BitWriter<Vec<_>, Endianness> = BitWriter::new(resp);
-    resp_noun.jam(&mut bitstream)?;
-
-    let resp = bitstream.into_writer();
+    let resp = resp_noun.jam()?;
     Ok(resp)
 }
 
