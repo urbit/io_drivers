@@ -8,10 +8,10 @@ use hyper::{
 };
 use hyper_rustls::{ConfigBuilderExt, HttpsConnector, HttpsConnectorBuilder};
 use noun::{
-    atom::{tuple_struct::Atom, Atom as _},
-    cell::{named_struct::Cell, Cell as _},
+    atom::{Atom as _},
+    cell::{Cell as _},
     serdes::{Cue, Jam},
-    tagged_union::Noun,
+    types::{atom::Atom, cell::Cell, noun::Noun},
     FromNoun, IntoNoun, Noun as _,
 };
 use rustls::ClientConfig;
