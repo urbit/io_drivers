@@ -8,9 +8,11 @@ use hyper::{
 };
 use hyper_rustls::{ConfigBuilderExt, HttpsConnector, HttpsConnectorBuilder};
 use noun::{
+    atom::{tuple_struct::Atom, Atom as _},
+    cell::{named_struct::Cell, Cell as _},
     serdes::{Cue, Jam},
-    types::{atom::Atom, cell::Cell, noun::Noun},
-    Atom as _, Cell as _, FromNoun, IntoNoun, Noun as _,
+    tagged_union::Noun,
+    FromNoun, IntoNoun, Noun as _,
 };
 use rustls::ClientConfig;
 use std::{future::Future, mem::size_of};
