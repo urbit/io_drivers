@@ -57,20 +57,12 @@ impl FromNoun<Atom, Cell, Noun> for Request {
         let req = req.body(body).map_err(|_| ())?;
         Ok(Self { req_num, req })
     }
-
-    fn from_noun(_req: Noun) -> Result<Self, ()> {
-        Err(())
-    }
 }
 
 struct Response(Parts, Bytes);
 
 impl IntoNoun<Atom, Cell, Noun> for Response {
     fn as_noun(&self) -> Result<Noun, ()> {
-        todo!()
-    }
-
-    fn into_noun(self) -> Result<Noun, ()> {
         todo!()
     }
 }
@@ -92,10 +84,6 @@ impl From<HyperError> for Error {
 
 impl IntoNoun<Atom, Cell, Noun> for Error {
     fn as_noun(&self) -> Result<Noun, ()> {
-        todo!()
-    }
-
-    fn into_noun(self) -> Result<Noun, ()> {
         todo!()
     }
 }
