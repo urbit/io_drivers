@@ -8,8 +8,8 @@ use hyper::{
 };
 use hyper_rustls::{ConfigBuilderExt, HttpsConnector, HttpsConnectorBuilder};
 use noun::{
-    atom::{Atom as _},
-    cell::{Cell as _},
+    atom::Atom as _,
+    cell::Cell as _,
     serdes::{Cue, Jam},
     types::{atom::Atom, cell::Cell, noun::Noun},
     FromNoun, IntoNoun, Noun as _,
@@ -27,18 +27,12 @@ struct Request {
 
 impl FromNoun<Atom, Cell, Noun> for Request {
     fn from_noun_ref(req_noun: &Noun) -> Result<Self, ()> {
-        let (req_num, req_noun) = req_noun.as_cell()?.as_parts();
+        let (req_num, method, uri, mut headers, body) = req_noun.as_cell()?.as_quint()?;
         let req_num = req_num.as_atom()?.as_u64()?;
 
-        let mut req = HyperRequest::builder();
-
-        let (method, req_noun) = req_noun.as_cell()?.as_parts();
-        req = req.method(method.as_atom()?.as_str()?);
-
-        let (uri, req_noun) = req_noun.as_cell()?.as_parts();
-        req = req.uri(uri.as_atom()?.as_str()?);
-
-        let (mut headers, body) = req_noun.as_cell()?.as_parts();
+        let mut req = HyperRequest::builder()
+            .method(method.as_atom()?.as_str()?)
+            .uri(uri.as_atom()?.as_str()?);
 
         while let Ok(cell) = headers.as_cell() {
             let header = cell.head();
