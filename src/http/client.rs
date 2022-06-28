@@ -8,11 +8,11 @@ use hyper::{
 };
 use hyper_rustls::{ConfigBuilderExt, HttpsConnector, HttpsConnectorBuilder};
 use noun::{
-    atom::Atom as _,
-    cell::Cell as _,
+    atom::{types::VecAtom as Atom, Atom as _},
+    cell::{types::RcCell as Cell, Cell as _},
+    convert::{FromNoun, IntoNoun},
+    noun::{types::EnumNoun as Noun, Noun as _},
     serdes::{Cue, Jam},
-    types::{atom::Atom, cell::Cell, noun::Noun},
-    FromNoun, IntoNoun, Noun as _,
 };
 use rustls::ClientConfig;
 use std::{future::Future, mem::size_of};
@@ -25,8 +25,8 @@ struct Request {
     req: HyperRequest<Body>,
 }
 
-impl FromNoun<Atom, Cell, Noun> for Request {
-    fn from_noun_ref(req_noun: &Noun) -> Result<Self, ()> {
+impl FromNoun<Atom, Cell, Noun<Atom, Cell>> for Request {
+    fn from_noun_ref(req_noun: &Noun<Atom, Cell>) -> Result<Self, ()> {
         let (req_num, method, uri, mut headers, body) = req_noun.as_cell()?.as_quint()?;
         let req_num = req_num.as_atom()?.as_u64()?;
 
@@ -53,12 +53,28 @@ impl FromNoun<Atom, Cell, Noun> for Request {
         let req = req.body(body).map_err(|_| ())?;
         Ok(Self { req_num, req })
     }
+
+    fn from_noun(req_noun: Noun<Atom, Cell>) -> Result<Self, ()> {
+        unimplemented!()
+    }
 }
 
 struct Response(Parts, Bytes);
 
-impl IntoNoun<Atom, Cell, Noun> for Response {
-    fn as_noun(&self) -> Result<Noun, ()> {
+impl IntoNoun<Atom, Cell, Noun<Atom, Cell>> for Response {
+    fn as_noun(&self) -> Result<Noun<Atom, Cell>, ()> {
+        todo!()
+    }
+
+    fn as_noun_unchecked(&self) -> Noun<Atom, Cell> {
+        todo!()
+    }
+
+    fn into_noun(self) -> Result<Noun<Atom, Cell>, ()> {
+        todo!()
+    }
+
+    fn into_noun_unchecked(self) -> Noun<Atom, Cell> {
         todo!()
     }
 }
@@ -78,8 +94,20 @@ impl From<HyperError> for Error {
     }
 }
 
-impl IntoNoun<Atom, Cell, Noun> for Error {
-    fn as_noun(&self) -> Result<Noun, ()> {
+impl IntoNoun<Atom, Cell, Noun<Atom, Cell>> for Error {
+    fn as_noun(&self) -> Result<Noun<Atom, Cell>, ()> {
+        todo!()
+    }
+
+    fn as_noun_unchecked(&self) -> Noun<Atom, Cell> {
+        todo!()
+    }
+
+    fn into_noun(self) -> Result<Noun<Atom, Cell>, ()> {
+        todo!()
+    }
+
+    fn into_noun_unchecked(self) -> Noun<Atom, Cell> {
         todo!()
     }
 }
