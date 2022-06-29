@@ -25,9 +25,23 @@ struct Request {
     req: HyperRequest<Body>,
 }
 
-impl FromNoun<Atom, Cell, Noun<Atom, Cell>> for Request {
-    fn from_noun_ref(req_noun: &Noun<Atom, Cell>) -> Result<Self, ()> {
-        let (req_num, method, uri, mut headers, body) = req_noun.as_cell()?.as_quint()?;
+impl FromNoun<Atom, Cell<Atom>, Noun<Atom, Cell<Atom>>> for Request {
+    fn from_noun_ref(req: &Noun<Atom, Cell<Atom>>) -> Result<Self, ()> {
+        let (req_num, method, uri, mut headers, body) = {
+            let req = req.as_cell()?;
+            let (req_num, req) = (req.head(), req.tail());
+
+            let req = req.as_cell()?;
+            let (method, req) = (req.head(), req.tail());
+
+            let req = req.as_cell()?;
+            let (uri, req) = (req.head(), req.tail());
+
+            let req = req.as_cell()?;
+            let (headers, body) = (req.head(), req.tail());
+
+            (req_num, method, uri, headers, body)
+        };
         let req_num = req_num.as_atom()?.as_u64()?;
 
         let mut req = HyperRequest::builder()
@@ -35,17 +49,17 @@ impl FromNoun<Atom, Cell, Noun<Atom, Cell>> for Request {
             .uri(uri.as_atom()?.as_str()?);
 
         while let Ok(cell) = headers.as_cell() {
-            let header = cell.head();
+            let header = cell.head().as_cell()?;
             headers = cell.tail();
 
-            let (key, val) = header.as_cell()?.as_parts();
+            let (key, val) = (header.head(), header.tail());
             let (key, val) = (key.as_atom()?.as_str()?, val.as_atom()?.as_str()?);
             req = req.header(key, val);
         }
 
         let body = if let Ok(body) = body.as_cell() {
-            let (_body_len, body) = body.as_parts();
-            Body::from(String::from(body.as_atom()?.as_str()?))
+            let (_body_len, body) = (body.head(), body.tail());
+            Body::from(body.as_atom()?.as_str()?.to_string())
         } else {
             Body::empty()
         };
@@ -54,27 +68,27 @@ impl FromNoun<Atom, Cell, Noun<Atom, Cell>> for Request {
         Ok(Self { req_num, req })
     }
 
-    fn from_noun(req_noun: Noun<Atom, Cell>) -> Result<Self, ()> {
+    fn from_noun(req_noun: Noun<Atom, Cell<Atom>>) -> Result<Self, ()> {
         unimplemented!()
     }
 }
 
 struct Response(Parts, Bytes);
 
-impl IntoNoun<Atom, Cell, Noun<Atom, Cell>> for Response {
-    fn as_noun(&self) -> Result<Noun<Atom, Cell>, ()> {
+impl IntoNoun<Atom, Cell<Atom>, Noun<Atom, Cell<Atom>>> for Response {
+    fn to_noun(&self) -> Result<Noun<Atom, Cell<Atom>>, ()> {
         todo!()
     }
 
-    fn as_noun_unchecked(&self) -> Noun<Atom, Cell> {
+    fn to_noun_unchecked(&self) -> Noun<Atom, Cell<Atom>> {
         todo!()
     }
 
-    fn into_noun(self) -> Result<Noun<Atom, Cell>, ()> {
+    fn into_noun(self) -> Result<Noun<Atom, Cell<Atom>>, ()> {
         todo!()
     }
 
-    fn into_noun_unchecked(self) -> Noun<Atom, Cell> {
+    fn into_noun_unchecked(self) -> Noun<Atom, Cell<Atom>> {
         todo!()
     }
 }
@@ -94,20 +108,20 @@ impl From<HyperError> for Error {
     }
 }
 
-impl IntoNoun<Atom, Cell, Noun<Atom, Cell>> for Error {
-    fn as_noun(&self) -> Result<Noun<Atom, Cell>, ()> {
+impl IntoNoun<Atom, Cell<Atom>, Noun<Atom, Cell<Atom>>> for Error {
+    fn to_noun(&self) -> Result<Noun<Atom, Cell<Atom>>, ()> {
         todo!()
     }
 
-    fn as_noun_unchecked(&self) -> Noun<Atom, Cell> {
+    fn to_noun_unchecked(&self) -> Noun<Atom, Cell<Atom>> {
         todo!()
     }
 
-    fn into_noun(self) -> Result<Noun<Atom, Cell>, ()> {
+    fn into_noun(self) -> Result<Noun<Atom, Cell<Atom>>, ()> {
         todo!()
     }
 
-    fn into_noun_unchecked(self) -> Noun<Atom, Cell> {
+    fn into_noun_unchecked(self) -> Noun<Atom, Cell<Atom>> {
         todo!()
     }
 }
