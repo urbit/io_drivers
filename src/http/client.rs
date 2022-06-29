@@ -15,7 +15,7 @@ use noun::{
     serdes::{Cue, Jam},
 };
 use rustls::ClientConfig;
-use std::{future::Future, mem::size_of};
+use std::{future::Future, mem::size_of, rc::Rc};
 use tokio::sync::mpsc::{Receiver, Sender};
 
 type HyperClient = Client<HttpsConnector<HttpConnector>, Body>;
@@ -68,16 +68,50 @@ impl FromNoun<Atom, Cell<Atom>, Noun<Atom, Cell<Atom>>> for Request {
         Ok(Self { req_num, req })
     }
 
-    fn from_noun(req_noun: Noun<Atom, Cell<Atom>>) -> Result<Self, ()> {
+    fn from_noun(_req: Noun<Atom, Cell<Atom>>) -> Result<Self, ()> {
         unimplemented!()
     }
 }
 
-struct Response(Parts, Bytes);
+struct Response {
+    parts: Parts,
+    body: Bytes,
+}
 
+/// Need
+/// - status as u32,
+/// - headers as noun,
+/// - body as noun,
 impl IntoNoun<Atom, Cell<Atom>, Noun<Atom, Cell<Atom>>> for Response {
     fn to_noun(&self) -> Result<Noun<Atom, Cell<Atom>>, ()> {
-        todo!()
+        let status = Rc::new(Atom::from_u16(self.parts.status.as_u16()).into_noun_unchecked());
+
+        let headers = {
+            let null = Rc::new(Atom::from_u8(0).into_noun_unchecked());
+            let mut headers_cell = null;
+            let headers = &self.parts.headers;
+            for key in headers.keys().map(|k| k.as_str()) {
+                let vals = headers.get_all(key);
+                let key = Rc::new(Atom::from(key).into_noun_unchecked());
+                for val in vals {
+                    let val = match val.to_str() {
+                        Ok(val) => Rc::new(Atom::from(val).into_noun_unchecked()),
+                        Err(_) => todo!("handle ToStrError"),
+                    };
+                    let head = Rc::new(Cell::new(key.clone(), val).into_noun_unchecked());
+                    let tail = headers_cell.clone();
+                    headers_cell = Rc::new(Cell::new(head, tail).into_noun_unchecked());
+                }
+            }
+            headers_cell
+        };
+        let body = Rc::new(Atom::from(self.body.to_vec()).into_noun_unchecked());
+
+        Ok(Cell::new(
+            status,
+            Rc::new(Cell::new(headers, body).into_noun_unchecked()),
+        )
+        .into_noun_unchecked())
     }
 
     fn to_noun_unchecked(&self) -> Noun<Atom, Cell<Atom>> {
@@ -85,11 +119,11 @@ impl IntoNoun<Atom, Cell<Atom>, Noun<Atom, Cell<Atom>>> for Response {
     }
 
     fn into_noun(self) -> Result<Noun<Atom, Cell<Atom>>, ()> {
-        todo!()
+        self.to_noun()
     }
 
     fn into_noun_unchecked(self) -> Noun<Atom, Cell<Atom>> {
-        todo!()
+        self.to_noun().expect("Response into Noun")
     }
 }
 
@@ -129,19 +163,13 @@ impl IntoNoun<Atom, Cell<Atom>, Noun<Atom, Cell<Atom>>> for Error {
 /// Send an HTTP request and receive its response.
 async fn send_http_request(client: HyperClient, req: Request) -> Result<Vec<u8>, ()> {
     // Send request and receive response.
-    let (resp_parts, resp_body) = {
-        let resp = client.request(req.req).await.map_err(|_| ())?;
-        let (parts, body) = resp.into_parts();
+    let resp = client.request(req.req).await.map_err(|_| ())?;
+    let (parts, body) = resp.into_parts();
 
-        // Wait for the entire response body to come in.
-        let body = body::to_bytes(body).await.map_err(|_| ())?;
-        (parts, body)
-    };
+    // Wait for the entire response body to come in.
+    let body = body::to_bytes(body).await.map_err(|_| ())?;
 
-    let resp_noun = Response(resp_parts, resp_body).into_noun()?;
-
-    let resp = resp_noun.jam()?;
-    Ok(resp)
+    Response { parts, body }.into_noun()?.jam()
 }
 
 /// This has to be synchronous because Noun is not Send.
