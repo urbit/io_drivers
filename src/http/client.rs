@@ -161,39 +161,45 @@ impl IntoNoun<Atom, Cell<Atom>, Noun<Atom, Cell<Atom>>> for Error {
 }
 
 /// Send an HTTP request and receive its response.
-async fn send_http_request(client: HyperClient, req: Request) -> Result<Vec<u8>, ()> {
+async fn send_http_request(
+    client: HyperClient,
+    req: Request,
+    resp_tx: Sender<Vec<u8>>,
+) -> Option<()> {
     // Send request and receive response.
-    let resp = client.request(req.req).await.map_err(|_| ())?;
+    let resp = client.request(req.req).await.ok()?;
     let (parts, body) = resp.into_parts();
 
     // Wait for the entire response body to come in.
-    let body = body::to_bytes(body).await.map_err(|_| ())?;
+    let body = body::to_bytes(body).await.ok()?;
 
-    Response { parts, body }.into_noun()?.jam()
+    let resp = Response { parts, body }.into_noun().ok()?.jam().ok()?;
+    resp_tx.send(resp).await.ok()?;
+    Some(())
 }
 
 /// This has to be synchronous because Noun is not Send.
 fn handle_io_request(
     client: HyperClient,
     req: Vec<u8>,
-    _resp_tx: Sender<Vec<u8>>,
-) -> Result<impl Future<Output = Result<Vec<u8>, ()>>, ()> {
-    let (tag, req_noun) = {
+    resp_tx: Sender<Vec<u8>>,
+) -> Option<impl Future<Output = Option<()>>> {
+    let (tag, req) = {
         // First byte is the request type, which should be skipped.
-        let start = size_of::<RequestTag>();
-        let bitstream: BitReader<&[_], Endianness> = BitReader::new(&req[start..]);
-        let noun = Noun::cue(bitstream)?;
-        noun.into_cell().map_err(|_| ())?.into_parts()
+        const START: usize = size_of::<RequestTag>();
+        let bitstream: BitReader<&[_], Endianness> = BitReader::new(&req[START..]);
+        let noun = Noun::cue(bitstream).unwrap();
+        noun.into_cell().unwrap().into_parts()
     };
 
-    let tag = tag.as_atom()?;
+    let tag = tag.as_atom().unwrap();
     if tag == "request" {
-        let req = Request::from_noun_ref(&req_noun)?;
-        return Ok(send_http_request(client, req));
+        let req = Request::from_noun_ref(&req).unwrap();
+        Some(send_http_request(client, req, resp_tx))
     } else if tag == "cancel-request" {
         todo!("cancel request");
     } else {
-        return Err(());
+        None
     }
 }
 
