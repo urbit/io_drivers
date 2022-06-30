@@ -74,6 +74,7 @@ impl FromNoun<Atom, Cell<Atom>, Noun<Atom, Cell<Atom>>> for Request {
 }
 
 struct Response {
+    req_num: u64,
     parts: Parts,
     body: Bytes,
 }
@@ -84,6 +85,7 @@ struct Response {
 /// - body as noun,
 impl IntoNoun<Atom, Cell<Atom>, Noun<Atom, Cell<Atom>>> for Response {
     fn to_noun(&self) -> Result<Noun<Atom, Cell<Atom>>, ()> {
+        let req_num = Rc::new(Atom::from_u64(self.req_num).into_noun_unchecked());
         let status = Rc::new(Atom::from_u16(self.parts.status.as_u16()).into_noun_unchecked());
 
         let headers = {
@@ -105,11 +107,34 @@ impl IntoNoun<Atom, Cell<Atom>, Noun<Atom, Cell<Atom>>> for Response {
             }
             headers_cell
         };
-        let body = Rc::new(Atom::from(self.body.to_vec()).into_noun_unchecked());
+
+        let body = {
+            let body = self.body.to_vec();
+            let null = Rc::new(Atom::from_u8(0).into_noun_unchecked());
+            if body.is_empty() {
+                null
+            } else {
+                let body_len = Rc::new(Atom::from_usize(body.len()).into_noun_unchecked());
+                let body = Rc::new(Atom::from(body).into_noun_unchecked());
+                Rc::new(
+                    Cell::new(
+                        null,
+                        Rc::new(Cell::new(body_len, body).into_noun_unchecked()),
+                    )
+                    .into_noun_unchecked(),
+                )
+            }
+        };
 
         Ok(Cell::new(
-            status,
-            Rc::new(Cell::new(headers, body).into_noun_unchecked()),
+            req_num,
+            Rc::new(
+                Cell::new(
+                    status,
+                    Rc::new(Cell::new(headers, body).into_noun_unchecked()),
+                )
+                .into_noun_unchecked(),
+            ),
         )
         .into_noun_unchecked())
     }
@@ -173,7 +198,16 @@ async fn send_http_request(
     // Wait for the entire response body to come in.
     let body = body::to_bytes(body).await.ok()?;
 
-    let resp = Response { parts, body }.into_noun().ok()?.jam().ok()?;
+    let req_num = req.req_num;
+    let resp = Response {
+        req_num,
+        parts,
+        body,
+    }
+    .into_noun()
+    .ok()?
+    .jam()
+    .ok()?;
     resp_tx.send(resp).await.ok()?;
     Some(())
 }
