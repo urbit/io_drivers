@@ -93,36 +93,37 @@ pub async fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::{io::BufReader, runtime};
+    use tokio::io::BufReader;
 
-    #[test]
-    fn recv_io_requests() {
-        runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(async {
-                const REQ: [u8; 13] = [
-                    5, 0, 0, 0, 0, 0, 0, 0, // Payload.
-                    b'h', b'e', b'l', b'l', b'o',
-                ];
-                let reader = BufReader::new(&REQ[..]);
-                let (req_tx, mut req_rx): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = mpsc::channel(8);
-
-                tokio::spawn(super::recv_io_requests(reader, req_tx));
-
-                let req = req_rx.recv().await.unwrap();
-                let req = String::from_utf8(req).unwrap();
-                assert_eq!(req, "hello");
-            });
+    macro_rules! async_test {
+        ($async_block:block) => {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async { $async_block });
+        };
     }
 
     #[test]
-    fn schedule_requests() {
-        runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(async {});
+    fn recv_io_requests() {
+        async_test!({
+            const REQ: [u8; 13] = [
+                5, 0, 0, 0, 0, 0, 0, 0, // Payload.
+                b'h', b'e', b'l', b'l', b'o',
+            ];
+            let reader = BufReader::new(&REQ[..]);
+            let (req_tx, mut req_rx): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = mpsc::channel(8);
+
+            tokio::spawn(super::recv_io_requests(reader, req_tx));
+
+            let req = req_rx.recv().await.unwrap();
+            let req = String::from_utf8(req).unwrap();
+            assert_eq!(req, "hello");
+        });
+    }
+
+    #[test]
+    fn send_io_responses() {
     }
 }
