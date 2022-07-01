@@ -59,6 +59,10 @@ async fn schedule_io_requests(mut req_rx: Receiver<Vec<u8>>, http_client_tx: Sen
 /// Read outgoing IO responses from the drivers and write the responses to some output source.
 async fn send_io_responses(mut writer: impl AsyncWriteExt + Unpin, mut resp_rx: Receiver<Vec<u8>>) {
     while let Some(mut resp) = resp_rx.recv().await {
+        let len = u64::try_from(resp.len()).unwrap();
+        if let Err(_) = writer.write_u64_le(len).await {
+            todo!("handle error");
+        }
         if let Err(_) = writer.write_all(&mut resp).await {
             todo!("handle error");
         }
