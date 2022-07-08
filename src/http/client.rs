@@ -28,10 +28,18 @@ struct Request {
 impl FromNoun<Atom, Cell<Atom>, Noun<Atom, Cell<Atom>>> for Request {
     fn from_noun_ref(req: &Noun<Atom, Cell<Atom>>) -> Result<Self, ()> {
         let (req_num, method, uri, mut headers, body) = {
-            let (req_num, req) = req.as_cell()?.as_parts();
-            let (method, req) = req.as_cell()?.as_parts();
-            let (uri, req) = req.as_cell()?.as_parts();
-            let (headers, body) = req.as_cell()?.as_parts();
+            let req = req.as_cell()?;
+            let (req_num, req) = (req.head(), req.tail());
+
+            let req = req.as_cell()?;
+            let (method, req) = (req.head(), req.tail());
+
+            let req = req.as_cell()?;
+            let (uri, req) = (req.head(), req.tail());
+
+            let req = req.as_cell()?;
+            let (headers, body) = (req.head(), req.tail());
+
             (req_num, method, uri, headers, body)
         };
         let req_num = req_num.as_atom()?.as_u64()?;
@@ -41,17 +49,16 @@ impl FromNoun<Atom, Cell<Atom>, Noun<Atom, Cell<Atom>>> for Request {
             .uri(uri.as_atom()?.as_str()?);
 
         while let Ok(cell) = headers.as_cell() {
-            let (header, remaining_headers) = cell.as_parts();
-            let header = header.as_cell()?;
-            headers = remaining_headers;
+            let header = cell.head().as_cell()?;
+            headers = cell.tail();
 
-            let (key, val) = header.as_parts();
+            let (key, val) = (header.head(), header.tail());
             let (key, val) = (key.as_atom()?.as_str()?, val.as_atom()?.as_str()?);
             req = req.header(key, val);
         }
 
         let body = if let Ok(body) = body.as_cell() {
-            let (_body_len, body) = body.as_parts();
+            let (_body_len, body) = (body.head(), body.tail());
             Body::from(body.as_atom()?.as_str()?.to_string())
         } else {
             Body::empty()
@@ -83,25 +90,22 @@ impl IntoNoun<Atom, Cell<Atom>, Noun<Atom, Cell<Atom>>> for Response {
 
         let headers = {
             let null = Rc::new(Atom::from_u8(0).into_noun_unchecked());
-            let mut headers = null;
-            let mut cnt = 0;
-            for (key, val) in &self.parts.headers {
-                //eprintln!("[{}]: key={}, val={}", cnt, key.as_str(), val.to_str().unwrap());
-                if cnt == 9 {
-                    break;
+            let mut headers_cell = null;
+            let headers = &self.parts.headers;
+            for key in headers.keys().map(|k| k.as_str()) {
+                let vals = headers.get_all(key);
+                let key = Rc::new(Atom::from(key).into_noun_unchecked());
+                for val in vals {
+                    let val = match val.to_str() {
+                        Ok(val) => Rc::new(Atom::from(val).into_noun_unchecked()),
+                        Err(_) => todo!("handle ToStrError"),
+                    };
+                    let head = Rc::new(Cell::new(key.clone(), val).into_noun_unchecked());
+                    let tail = headers_cell.clone();
+                    headers_cell = Rc::new(Cell::new(head, tail).into_noun_unchecked());
                 }
-                if let Ok(val) = val.to_str() {
-                    let key = Rc::new(Atom::from(key.as_str()).into_noun_unchecked());
-                    let val = Rc::new(Atom::from(val).into_noun_unchecked());
-                    let head = Rc::new(Cell::new(key, val).into_noun_unchecked());
-                    let tail = headers;
-                    headers = Rc::new(Cell::new(head, tail).into_noun_unchecked());
-                } else {
-                    todo!("handle ToStrError");
-                }
-                cnt += 1;
             }
-            headers
+            headers_cell
         };
 
         let body = {
