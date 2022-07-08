@@ -66,6 +66,9 @@ async fn send_io_responses(mut writer: impl AsyncWriteExt + Unpin, mut resp_rx: 
         if let Err(_) = writer.write_all(&mut resp).await {
             todo!("handle error");
         }
+        if let Err(_) = writer.flush().await {
+            todo!("handle error");
+        }
     }
 }
 
