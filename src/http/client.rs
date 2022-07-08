@@ -132,7 +132,8 @@ impl IntoNoun<Atom, Cell<Atom>, Noun<Atom, Cell<Atom>>> for Response {
             Rc::new(
                 Cell::new(
                     status,
-                    Rc::new(Cell::new(headers, body).into_noun_unchecked()),
+                    body,
+                    //Rc::new(Cell::new(headers, body).into_noun_unchecked()),
                 )
                 .into_noun_unchecked(),
             ),
