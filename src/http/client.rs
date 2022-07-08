@@ -58,7 +58,8 @@ impl FromNoun<Atom, Cell<Atom>, Noun<Atom, Cell<Atom>>> for Request {
         }
 
         let body = if let Ok(body) = body.as_cell() {
-            let (_body_len, body) = (body.head(), body.tail());
+            let (_null, body) = body.as_parts();
+            let (_body_len, body) = body.as_cell()?.as_parts();
             Body::from(body.as_atom()?.as_str()?.to_string())
         } else {
             Body::empty()
