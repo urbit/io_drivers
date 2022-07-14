@@ -1,5 +1,3 @@
-use crate::{Endianness, RequestTag};
-use bitstream_io::BitReader;
 use hyper::{
     body::{self, Bytes},
     client::{Client, HttpConnector},
@@ -8,14 +6,14 @@ use hyper::{
 };
 use hyper_rustls::{ConfigBuilderExt, HttpsConnector, HttpsConnectorBuilder};
 use noun::{
-    atom::{types::VecAtom as Atom, Atom as _},
-    cell::{types::RcCell as Cell, Cell as _},
-    convert::{FromNoun, IntoNoun},
-    noun::{types::EnumNoun as Noun, Noun as _},
+    atom::Atom,
+    cell::Cell,
+    convert::{self, FromNoun, IntoNoun},
+    noun::Noun,
     serdes::{Cue, Jam},
 };
 use rustls::ClientConfig;
-use std::{future::Future, mem::size_of, rc::Rc};
+use std::future::Future;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 type HyperClient = Client<HttpsConnector<HttpConnector>, Body>;
@@ -25,51 +23,69 @@ struct Request {
     req: HyperRequest<Body>,
 }
 
-impl FromNoun<Atom, Cell<Atom>, Noun<Atom, Cell<Atom>>> for Request {
-    fn from_noun_ref(req: &Noun<Atom, Cell<Atom>>) -> Result<Self, ()> {
-        let (req_num, method, uri, mut headers, body) = {
-            let req = req.as_cell()?;
-            let (req_num, req) = (req.head(), req.tail());
-
-            let req = req.as_cell()?;
-            let (method, req) = (req.head(), req.tail());
-
-            let req = req.as_cell()?;
-            let (uri, req) = (req.head(), req.tail());
-
-            let req = req.as_cell()?;
-            let (headers, body) = (req.head(), req.tail());
-
-            (req_num, method, uri, headers, body)
-        };
-        let req_num = req_num.as_atom()?.as_u64()?;
-
-        let mut req = HyperRequest::builder()
-            .method(method.as_atom()?.as_str()?)
-            .uri(uri.as_atom()?.as_str()?);
-
-        while let Ok(cell) = headers.as_cell() {
-            let header = cell.head().as_cell()?;
-            headers = cell.tail();
-
-            let (key, val) = (header.head(), header.tail());
-            let (key, val) = (key.as_atom()?.as_str()?, val.as_atom()?.as_str()?);
-            req = req.header(key, val);
+impl FromNoun for Request {
+    fn from_noun_ref(req: &Noun) -> Result<Self, convert::Error> {
+        fn atom_as_str(atom: &Atom) -> Result<&str, convert::Error> {
+            atom.as_str().map_err(|_| convert::Error::AtomToStr)
         }
 
-        let body = if let Ok(body) = body.as_cell() {
-            let (_null, body) = body.as_parts();
-            let (_body_len, body) = body.as_cell()?.as_parts();
-            Body::from(body.as_atom()?.as_str()?.to_string())
-        } else {
-            Body::empty()
-        };
+        if let Noun::Cell(req) = req {
+            let [req_num, method, uri, headers, body] = req
+                .as_list::<5>()
+                .ok_or(convert::Error::NotEnoughElements)?;
+            if let (Noun::Atom(req_num), Noun::Atom(method), Noun::Atom(uri), mut headers, body) =
+                (&*req_num, &*method, &*uri, headers, body)
+            {
+                let req_num = req_num.as_u64().ok_or(convert::Error::AtomToUint)?;
 
-        let req = req.body(body).map_err(|_| ())?;
-        Ok(Self { req_num, req })
+                let mut req = HyperRequest::builder()
+                    .method(atom_as_str(method)?)
+                    .uri(atom_as_str(uri)?);
+
+                while let Noun::Cell(cell) = &*headers {
+                    let header = cell.head();
+                    if let Noun::Cell(header) = &*header {
+                        if let (Noun::Atom(key), Noun::Atom(val)) =
+                            (&*header.head(), &*header.tail())
+                        {
+                            req = req.header(atom_as_str(key)?, atom_as_str(val)?);
+                        } else {
+                            return Err(convert::Error::UnexpectedCell);
+                        }
+                    } else {
+                        return Err(convert::Error::UnexpectedAtom);
+                    }
+                    headers = cell.tail();
+                }
+
+                let body = match &*body {
+                    Noun::Atom(_) => Body::empty(),
+                    Noun::Cell(body) => {
+                        let [_null, _body_len, body] = body
+                            .as_list::<3>()
+                            .ok_or(convert::Error::NotEnoughElements)?;
+
+                        if let Noun::Atom(body) = &*body {
+                            Body::from(atom_as_str(body)?.to_string())
+                        } else {
+                            return Err(convert::Error::UnexpectedCell);
+                        }
+                    }
+                };
+
+                Ok(Self {
+                    req_num,
+                    req: req.body(body).map_err(|_| convert::Error::DestType)?,
+                })
+            } else {
+                Err(convert::Error::UnexpectedCell)
+            }
+        } else {
+            Err(convert::Error::UnexpectedCell)
+        }
     }
 
-    fn from_noun(_req: Noun<Atom, Cell<Atom>>) -> Result<Self, ()> {
+    fn from_noun(_req: Noun) -> Result<Self, convert::Error> {
         unimplemented!()
     }
 }
@@ -84,26 +100,28 @@ struct Response {
 /// - status as u32,
 /// - headers as noun,
 /// - body as noun,
-impl IntoNoun<Atom, Cell<Atom>, Noun<Atom, Cell<Atom>>> for Response {
-    fn to_noun(&self) -> Result<Noun<Atom, Cell<Atom>>, ()> {
-        let req_num = Rc::new(Atom::from_u64(self.req_num).into_noun_unchecked());
-        let status = Rc::new(Atom::from_u16(self.parts.status.as_u16()).into_noun_unchecked());
+impl IntoNoun for Response {
+    type Error = ();
+
+    fn to_noun(&self) -> Result<Noun, ()> {
+        let req_num = Atom::from(self.req_num).into_noun_ptr();
+        let status = Atom::from(self.parts.status.as_u16()).into_noun_ptr();
+        let null = Atom::from(0u8).into_noun_ptr();
 
         let headers = {
-            let null = Rc::new(Atom::from_u8(0).into_noun_unchecked());
-            let mut headers_cell = null;
+            let mut headers_cell = null.clone();
             let headers = &self.parts.headers;
             for key in headers.keys().map(|k| k.as_str()) {
                 let vals = headers.get_all(key);
-                let key = Rc::new(Atom::from(key).into_noun_unchecked());
+                let key = Atom::from(key).into_noun_ptr();
                 for val in vals {
                     let val = match val.to_str() {
-                        Ok(val) => Rc::new(Atom::from(val).into_noun_unchecked()),
+                        Ok(val) => Atom::from(val).into_noun_ptr(),
                         Err(_) => todo!("handle ToStrError"),
                     };
-                    let head = Rc::new(Cell::new(key.clone(), val).into_noun_unchecked());
-                    let tail = headers_cell.clone();
-                    headers_cell = Rc::new(Cell::new(head, tail).into_noun_unchecked());
+                    headers_cell =
+                        Cell::from([Cell::from([key.clone(), val]).into_noun_ptr(), headers_cell])
+                            .into_noun_ptr();
                 }
             }
             headers_cell
@@ -111,46 +129,20 @@ impl IntoNoun<Atom, Cell<Atom>, Noun<Atom, Cell<Atom>>> for Response {
 
         let body = {
             let body = self.body.to_vec();
-            let null = Rc::new(Atom::from_u8(0).into_noun_unchecked());
             if body.is_empty() {
                 null
             } else {
-                let body_len = Rc::new(Atom::from_usize(body.len()).into_noun_unchecked());
-                let body = Rc::new(Atom::from(body).into_noun_unchecked());
-                Rc::new(
-                    Cell::new(
-                        null,
-                        Rc::new(Cell::new(body_len, body).into_noun_unchecked()),
-                    )
-                    .into_noun_unchecked(),
-                )
+                let body_len = Atom::from(body.len());
+                let body = Atom::from(body);
+                Cell::from([null, Cell::from([body_len, body]).into_noun_ptr()]).into_noun_ptr()
             }
         };
 
-        Ok(Cell::new(
-            req_num,
-            Rc::new(
-                Cell::new(
-                    status,
-                    body,
-                    //Rc::new(Cell::new(headers, body).into_noun_unchecked()),
-                )
-                .into_noun_unchecked(),
-            ),
-        )
-        .into_noun_unchecked())
+        Ok(Cell::from([req_num, status, headers, body]).into_noun())
     }
 
-    fn to_noun_unchecked(&self) -> Noun<Atom, Cell<Atom>> {
-        todo!()
-    }
-
-    fn into_noun(self) -> Result<Noun<Atom, Cell<Atom>>, ()> {
+    fn into_noun(self) -> Result<Noun, ()> {
         self.to_noun()
-    }
-
-    fn into_noun_unchecked(self) -> Noun<Atom, Cell<Atom>> {
-        self.to_noun().expect("Response into Noun")
     }
 }
 
@@ -169,20 +161,14 @@ impl From<HyperError> for Error {
     }
 }
 
-impl IntoNoun<Atom, Cell<Atom>, Noun<Atom, Cell<Atom>>> for Error {
-    fn to_noun(&self) -> Result<Noun<Atom, Cell<Atom>>, ()> {
+impl IntoNoun for Error {
+    type Error = ();
+
+    fn to_noun(&self) -> Result<Noun, ()> {
         todo!()
     }
 
-    fn to_noun_unchecked(&self) -> Noun<Atom, Cell<Atom>> {
-        todo!()
-    }
-
-    fn into_noun(self) -> Result<Noun<Atom, Cell<Atom>>, ()> {
-        todo!()
-    }
-
-    fn into_noun_unchecked(self) -> Noun<Atom, Cell<Atom>> {
+    fn into_noun(self) -> Result<Noun, ()> {
         todo!()
     }
 }
@@ -209,7 +195,7 @@ async fn send_http_request(
     .into_noun()
     .ok()?
     .jam()
-    .ok()?;
+    .into_vec();
     resp_tx.send(resp).await.ok()?;
     Some(())
 }
@@ -221,19 +207,23 @@ fn handle_io_request(
     resp_tx: Sender<Vec<u8>>,
 ) -> Option<impl Future<Output = Option<()>>> {
     let (tag, req) = {
-        // First byte is the request type, which should be skipped.
-        const START: usize = size_of::<RequestTag>();
-        let bitstream: BitReader<&[_], Endianness> = BitReader::new(&req[START..]);
-        let noun = Noun::cue(bitstream).unwrap();
-        noun.into_cell().unwrap().into_parts()
+        let noun = Noun::cue(Atom::from(req)).unwrap();
+        if let Noun::Cell(cell) = noun {
+            cell.into_parts()
+        } else {
+            todo!("handle error")
+        }
     };
 
-    let tag = tag.as_atom().unwrap();
-    if tag == "request" {
-        let req = Request::from_noun_ref(&req).unwrap();
-        Some(send_http_request(client, req, resp_tx))
-    } else if tag == "cancel-request" {
-        todo!("cancel request");
+    if let Noun::Atom(tag) = &*tag {
+        match tag.as_str() {
+            Ok("request") => {
+                let req = Request::from_noun_ref(&req).unwrap();
+                Some(send_http_request(client, req, resp_tx))
+            }
+            Ok("cancel-request") => todo!("cancel request"),
+            _ => todo!("handle error"),
+        }
     } else {
         None
     }

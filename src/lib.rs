@@ -9,49 +9,38 @@ use tokio::{
 
 type Channel<T> = (Sender<T>, Receiver<T>);
 
-/// Endianness of requests.
-type Endianness = bitstream_io::LittleEndian;
-
 type RequestTag = u8;
 
 /// Tag identifying the type of a serialized IO request.
 const HTTP_CLIENT: RequestTag = 0;
 
 /// Read incoming IO requests from some input source.
-async fn recv_io_requests(mut reader: impl AsyncReadExt + Unpin, req_tx: Sender<Vec<u8>>) {
+async fn recv_io_requests(mut reader: impl AsyncReadExt + Unpin, http_client_tx: Sender<Vec<u8>>) {
     loop {
         let req_len = match reader.read_u64_le().await {
             Ok(0) => break,
-            Ok(req_len) => usize::try_from(req_len).expect("usize is smaller than u64"),
+            Ok(req_len) => usize::try_from(req_len).expect("u64 to usize"),
             Err(err) => match err.kind() {
                 ErrorKind::UnexpectedEof => break,
                 _ => todo!(),
             },
         };
-        let mut req = Vec::with_capacity(req_len);
-        req.resize(req_len, 0);
+        let req_tag = match reader.read_u8().await {
+            Ok(req_tag) => req_tag,
+            Err(_err) => todo!("handle error"),
+        };
+        // TODO: don't count the tag in the request length when sending from C side.
+        let mut req = Vec::with_capacity(req_len - 1);
+        req.resize(req_len - 1, 0); // XX: replace req_len - 1 with req.capacity().
         match reader.read_exact(&mut req).await {
-            Ok(_) => {
-                // TODO: better error handling.
-                req_tx.send(req).await.unwrap();
-            }
+            Ok(_) => match req_tag {
+                HTTP_CLIENT => {
+                    // TODO: better error handling.
+                    http_client_tx.send(req).await.unwrap();
+                }
+                _ => todo!(),
+            },
             Err(_) => todo!("handle error"),
-        }
-    }
-}
-
-/// Schedule IO requests with the appropriate driver.
-async fn schedule_io_requests(mut req_rx: Receiver<Vec<u8>>, http_client_tx: Sender<Vec<u8>>) {
-    while let Some(req) = req_rx.recv().await {
-        match req[0] {
-            HTTP_CLIENT => {
-                // TODO: better error handling.
-                http_client_tx.send(req).await.unwrap();
-            }
-            _ => {
-                println!("req={}", String::from_utf8(req).unwrap());
-                //todo!("unknown request type");
-            }
         }
     }
 }
@@ -87,12 +76,9 @@ pub async fn run() {
     let http_client_task = tokio::spawn(http::client::run(http_client_rx, resp_tx));
 
     // input task -> scheduling task
-    let (req_tx, req_rx): Channel<Vec<u8>> = mpsc::channel(QUEUE_SIZE);
-    let scheduling_task = tokio::spawn(schedule_io_requests(req_rx, http_client_tx));
-    let input_task = tokio::spawn(recv_io_requests(io::stdin(), req_tx));
+    let input_task = tokio::spawn(recv_io_requests(io::stdin(), http_client_tx));
 
     input_task.await.unwrap();
-    scheduling_task.await.unwrap();
     http_client_task.await.unwrap();
     output_task.await.unwrap();
 }
@@ -115,8 +101,9 @@ mod tests {
     #[test]
     fn recv_io_requests() {
         async_test!({
-            const REQ: [u8; 13] = [
-                5, 0, 0, 0, 0, 0, 0, 0, // Payload.
+            const REQ: [u8; 14] = [
+                6, 0, 0, 0, 0, 0, 0, 0, // Tag.
+                0, // Payload.
                 b'h', b'e', b'l', b'l', b'o',
             ];
             let reader = BufReader::new(&REQ[..]);
@@ -131,6 +118,5 @@ mod tests {
     }
 
     #[test]
-    fn send_io_responses() {
-    }
+    fn send_io_responses() {}
 }
