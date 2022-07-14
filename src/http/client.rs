@@ -252,3 +252,90 @@ pub async fn run(mut req_rx: Receiver<Vec<u8>>, resp_tx: Sender<Vec<u8>>) {
         tokio::spawn(async move { handle_io_request(client_clone, req, resp_tx_clone)?.await });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hyper::http::response;
+
+    #[test]
+    fn response_into_noun() {
+        // [
+        //   107
+        //   [
+        //     200
+        //     [%x-cached 'HIT']
+        //     [%vary 'Origin']
+        //     [[%vary 'Origin'] 'Accept-Encoding']
+        //     [%connection %keep-alive]
+        //     [%content-length 14645]
+        //     [%content-type 'application/json']
+        //     [%date 'Fri, 08 Jul 2022 16:43:50 GMT']
+        //     [%server 'nginx/1.14.0 (Ubuntu)']
+        //     0
+        //   ]
+        //   [0 59 '[{"jsonrpc":"2.0","id":"block number","result":"0xe67461"}]']
+        // ]
+        {
+            let req_num = 107u64;
+            let (parts, _body) = response::Builder::new()
+                .status(200)
+                .header("x-cached", "HIT")
+                .header("vary", "Origin")
+                .header("vary", "Accept-Encoding")
+                .header("connection", "keep-alive")
+                .header("content-length", "14645")
+                .header("content-type", "application/json")
+                .header("date", "Fri, 08 Jul 2022 16:43:50 GMT")
+                .header("server", "nginx/1.14.0 (Ubuntu)")
+                .body(())
+                .expect("build response")
+                .into_parts();
+            let body =
+                Bytes::from(r#"[{"jsonrpc":"2.0","id":"block number","result":"0xe67461"}]"#);
+
+            let resp = Response {
+                req_num,
+                parts,
+                body,
+            };
+
+            let noun = resp.to_noun().expect("to noun");
+            let expected = Cell::from([
+                Atom::from(req_num).into_noun(),
+                Atom::from(200u8).into_noun(),
+                Cell::from([
+                    Cell::from([Atom::from("server"), Atom::from("nginx/1.14.0 (Ubuntu)")])
+                        .into_noun(),
+                    Cell::from([
+                        Atom::from("date"),
+                        Atom::from("Fri, 08 Jul 2022 16:43:50 GMT"),
+                    ])
+                    .into_noun(),
+                    Cell::from([Atom::from("content-type"), Atom::from("application/json")])
+                        .into_noun(),
+                    Cell::from([Atom::from("content-length"), Atom::from("14645")]).into_noun(),
+                    Cell::from([Atom::from("connection"), Atom::from("keep-alive")]).into_noun(),
+                    Cell::from([Atom::from("vary"), Atom::from("Accept-Encoding")]).into_noun(),
+                    Cell::from([Atom::from("vary"), Atom::from("Origin")]).into_noun(),
+                    Cell::from([Atom::from("x-cached"), Atom::from("HIT")]).into_noun(),
+                    Atom::from(0u8).into_noun(),
+                ])
+                .into_noun(),
+                Cell::from([
+                    Atom::from(0u8),
+                    Atom::from(59u8),
+                    Atom::from(r#"[{"jsonrpc":"2.0","id":"block number","result":"0xe67461"}]"#),
+                ])
+                .into_noun(),
+            ])
+            .into_noun();
+            println!("noun={}", noun);
+            println!("expected={}", expected);
+
+            // If this test starts failing, it may be because the headers are in a different
+            // (though still correct order).
+            assert_eq!(noun, expected);
+        }
+    }
+}
