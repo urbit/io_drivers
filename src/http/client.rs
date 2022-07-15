@@ -115,24 +115,24 @@ impl IntoNoun for Response {
     type Error = ();
 
     fn to_noun(&self) -> Result<Noun, ()> {
-        let req_num = Atom::from(self.req_num).into_noun_ptr();
-        let status = Atom::from(self.parts.status.as_u16()).into_noun_ptr();
-        let null = Atom::from(0u8).into_noun_ptr();
+        let req_num = Atom::from(self.req_num).into_rc_noun();
+        let status = Atom::from(self.parts.status.as_u16()).into_rc_noun();
+        let null = Atom::from(0u8).into_rc_noun();
 
         let headers = {
             let mut headers_cell = null.clone();
             let headers = &self.parts.headers;
             for key in headers.keys().map(|k| k.as_str()) {
                 let vals = headers.get_all(key);
-                let key = Atom::from(key).into_noun_ptr();
+                let key = Atom::from(key).into_rc_noun();
                 for val in vals {
                     let val = match val.to_str() {
-                        Ok(val) => Atom::from(val).into_noun_ptr(),
+                        Ok(val) => Atom::from(val).into_rc_noun(),
                         Err(_) => todo!("handle ToStrError"),
                     };
                     headers_cell =
-                        Cell::from([Cell::from([key.clone(), val]).into_noun_ptr(), headers_cell])
-                            .into_noun_ptr();
+                        Cell::from([Cell::from([key.clone(), val]).into_rc_noun(), headers_cell])
+                            .into_rc_noun();
                 }
             }
             headers_cell
@@ -145,7 +145,7 @@ impl IntoNoun for Response {
             } else {
                 let body_len = Atom::from(body.len());
                 let body = Atom::from(body);
-                Cell::from([null, Cell::from([body_len, body]).into_noun_ptr()]).into_noun_ptr()
+                Cell::from([null, Cell::from([body_len, body]).into_rc_noun()]).into_rc_noun()
             }
         };
 
