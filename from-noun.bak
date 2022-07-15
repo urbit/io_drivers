@@ -1,0 +1,44 @@
+
+        /*
+        let (req_num, method, uri, mut headers, body) = {
+            let req = req.as_cell()?;
+            let (req_num, req) = (req.head(), req.tail());
+
+            let req = req.as_cell()?;
+            let (method, req) = (req.head(), req.tail());
+
+            let req = req.as_cell()?;
+            let (uri, req) = (req.head(), req.tail());
+
+            let req = req.as_cell()?;
+            let (headers, body) = (req.head(), req.tail());
+
+            (req_num, method, uri, headers, body)
+        };
+        let req_num = req_num.as_atom()?.as_u64()?;
+
+        let mut req = HyperRequest::builder()
+            .method(method.as_atom()?.as_str()?)
+            .uri(uri.as_atom()?.as_str()?);
+
+        while let Ok(cell) = headers.as_cell() {
+            let header = cell.head().as_cell()?;
+            headers = cell.tail();
+
+            let (key, val) = (header.head(), header.tail());
+            let (key, val) = (key.as_atom()?.as_str()?, val.as_atom()?.as_str()?);
+            req = req.header(key, val);
+        }
+
+        let body = if let Ok(body) = body.as_cell() {
+            let (_null, body) = body.as_parts();
+            // XXX: does _body_len need to be used?
+            let (_body_len, body) = body.as_cell()?.as_parts();
+            Body::from(body.as_atom()?.as_str()?.to_string())
+        } else {
+            Body::empty()
+        };
+
+        let req = req.body(body).map_err(|_| ())?;
+        Ok(Self { req_num, req })
+        */

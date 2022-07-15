@@ -30,9 +30,8 @@ impl FromNoun for Request {
         }
 
         if let Noun::Cell(req) = req {
-            let [req_num, method, uri, headers, body] = req
-                .as_list::<5>()
-                .ok_or(convert::Error::NotEnoughElements)?;
+            let [req_num, method, uri, headers, body] =
+                req.as_list::<5>().ok_or(convert::Error::MissingValue)?;
             if let (Noun::Atom(req_num), Noun::Atom(method), Noun::Atom(uri), mut headers, body) =
                 (&*req_num, &*method, &*uri, headers, body)
             {
@@ -58,25 +57,37 @@ impl FromNoun for Request {
                     headers = cell.tail();
                 }
 
-                let body = match &*body {
-                    Noun::Atom(_) => Body::empty(),
+                let (body_len, body) = match &*body {
+                    Noun::Atom(_) => (0, Body::empty()),
                     Noun::Cell(body) => {
-                        let [_null, _body_len, body] = body
-                            .as_list::<3>()
-                            .ok_or(convert::Error::NotEnoughElements)?;
+                        let [_null, body_len, body] =
+                            body.as_list::<3>().ok_or(convert::Error::MissingValue)?;
 
-                        if let Noun::Atom(body) = &*body {
-                            Body::from(atom_as_str(body)?.to_string())
+                        if let (Noun::Atom(body_len), Noun::Atom(body)) = (&*body_len, &*body) {
+                            let body_len = body_len.as_u64().ok_or(convert::Error::AtomToUint)?;
+                            let body = Body::from(atom_as_str(body)?.to_string());
+                            (body_len, body)
                         } else {
                             return Err(convert::Error::UnexpectedCell);
                         }
                     }
                 };
 
-                Ok(Self {
-                    req_num,
-                    req: req.body(body).map_err(|_| convert::Error::DestType)?,
-                })
+                let host = {
+                    let uri = req.uri_ref().ok_or(convert::Error::MissingValue)?;
+                    match (uri.host(), uri.port()) {
+                        (Some(host), Some(port)) => format!("{}:{}", host, port),
+                        (Some(host), None) => String::from(host),
+                        _ => return Err(convert::Error::MissingValue),
+                    }
+                };
+                let req = req
+                    .header("Content-Length", body_len)
+                    .header("Host", host)
+                    .body(body)
+                    .map_err(|_| convert::Error::DestType)?;
+
+                Ok(Self { req_num, req })
             } else {
                 Err(convert::Error::UnexpectedCell)
             }
@@ -330,8 +341,6 @@ mod tests {
                 .into_noun(),
             ])
             .into_noun();
-            println!("noun={}", noun);
-            println!("expected={}", expected);
 
             // If this test starts failing, it may be because the headers are in a different
             // (though still correct order).
