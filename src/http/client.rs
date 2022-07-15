@@ -24,7 +24,7 @@ struct Request {
 }
 
 impl FromNoun for Request {
-    fn from_noun_ref(req: &Noun) -> Result<Self, convert::Error> {
+    fn from_noun(req: &Noun) -> Result<Self, convert::Error> {
         fn atom_as_str(atom: &Atom) -> Result<&str, convert::Error> {
             atom.as_str().map_err(|_| convert::Error::AtomToStr)
         }
@@ -85,7 +85,7 @@ impl FromNoun for Request {
                     .header("Content-Length", body_len)
                     .header("Host", host)
                     .body(body)
-                    .map_err(|_| convert::Error::DestType)?;
+                    .map_err(|_| convert::Error::ImplType)?;
 
                 Ok(Self { req_num, req })
             } else {
@@ -94,10 +94,6 @@ impl FromNoun for Request {
         } else {
             Err(convert::Error::UnexpectedCell)
         }
-    }
-
-    fn from_noun(_req: Noun) -> Result<Self, convert::Error> {
-        unimplemented!()
     }
 }
 
@@ -114,7 +110,7 @@ struct Response {
 impl IntoNoun for Response {
     type Error = ();
 
-    fn to_noun(&self) -> Result<Noun, ()> {
+    fn into_noun(self) -> Result<Noun, ()> {
         let req_num = Atom::from(self.req_num).into_rc_noun();
         let status = Atom::from(self.parts.status.as_u16()).into_rc_noun();
         let null = Atom::from(0u8).into_rc_noun();
@@ -151,10 +147,6 @@ impl IntoNoun for Response {
 
         Ok(Cell::from([req_num, status, headers, body]).into_noun())
     }
-
-    fn into_noun(self) -> Result<Noun, ()> {
-        self.to_noun()
-    }
 }
 
 #[derive(Debug)]
@@ -174,10 +166,6 @@ impl From<HyperError> for Error {
 
 impl IntoNoun for Error {
     type Error = ();
-
-    fn to_noun(&self) -> Result<Noun, ()> {
-        todo!()
-    }
 
     fn into_noun(self) -> Result<Noun, ()> {
         todo!()
@@ -229,7 +217,7 @@ fn handle_io_request(
     if let Noun::Atom(tag) = &*tag {
         match tag.as_str() {
             Ok("request") => {
-                let req = Request::from_noun_ref(&req).unwrap();
+                let req = Request::from_noun(&req).unwrap();
                 Some(send_http_request(client, req, resp_tx))
             }
             Ok("cancel-request") => todo!("cancel request"),
