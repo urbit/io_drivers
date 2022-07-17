@@ -2,15 +2,15 @@ use hyper::{
     body::{self, Bytes},
     client::{Client, HttpConnector},
     http::response::Parts,
-    Body, Error as HyperError, Request as HyperRequest,
+    Body, Request as HyperRequest,
 };
 use hyper_rustls::{ConfigBuilderExt, HttpsConnector, HttpsConnectorBuilder};
 use noun::{
     atom::Atom,
     cell::Cell,
-    convert::{self, FromNoun, IntoNoun},
-    noun::Noun,
+    convert::{self, TryFromNoun, TryIntoNoun},
     serdes::{Cue, Jam},
+    Noun, Rc,
 };
 use rustls::ClientConfig;
 use std::future::Future;
@@ -23,13 +23,13 @@ struct Request {
     req: HyperRequest<Body>,
 }
 
-impl FromNoun for Request {
-    fn from_noun(req: &Noun) -> Result<Self, convert::Error> {
+impl TryFromNoun<Rc<Noun>> for Request {
+    fn try_from_noun(req: Rc<Noun>) -> Result<Self, convert::Error> {
         fn atom_as_str(atom: &Atom) -> Result<&str, convert::Error> {
             atom.as_str().map_err(|_| convert::Error::AtomToStr)
         }
 
-        if let Noun::Cell(req) = req {
+        if let Noun::Cell(req) = &*req {
             let [req_num, method, uri, headers, body] =
                 req.as_list::<5>().ok_or(convert::Error::MissingValue)?;
             if let (Noun::Atom(req_num), Noun::Atom(method), Noun::Atom(uri), mut headers, body) =
@@ -107,10 +107,10 @@ struct Response {
 /// - status as u32,
 /// - headers as noun,
 /// - body as noun,
-impl IntoNoun for Response {
+impl TryIntoNoun<Noun> for Response {
     type Error = ();
 
-    fn into_noun(self) -> Result<Noun, ()> {
+    fn try_into_noun(self) -> Result<Noun, ()> {
         let req_num = Atom::from(self.req_num).into_rc_noun();
         let status = Atom::from(self.parts.status.as_u16()).into_rc_noun();
         let null = Atom::from(0u8).into_rc_noun();
@@ -149,29 +149,6 @@ impl IntoNoun for Response {
     }
 }
 
-#[derive(Debug)]
-enum Error {
-    //Cue,
-    //FromNoun,
-    Hyper(HyperError),
-    //IntoNoun,
-    //Jam,
-}
-
-impl From<HyperError> for Error {
-    fn from(err: HyperError) -> Self {
-        Self::Hyper(err)
-    }
-}
-
-impl IntoNoun for Error {
-    type Error = ();
-
-    fn into_noun(self) -> Result<Noun, ()> {
-        todo!()
-    }
-}
-
 /// Send an HTTP request and receive its response.
 async fn send_http_request(
     client: HyperClient,
@@ -191,7 +168,7 @@ async fn send_http_request(
         parts,
         body,
     }
-    .into_noun()
+    .try_into_noun()
     .ok()?
     .jam()
     .into_vec();
@@ -217,7 +194,7 @@ fn handle_io_request(
     if let Noun::Atom(tag) = &*tag {
         match tag.as_str() {
             Ok("request") => {
-                let req = Request::from_noun(&req).unwrap();
+                let req = Request::try_from_noun(req).unwrap();
                 Some(send_http_request(client, req, resp_tx))
             }
             Ok("cancel-request") => todo!("cancel request"),
@@ -299,7 +276,7 @@ mod tests {
                 body,
             };
 
-            let noun = resp.to_noun().expect("to noun");
+            let noun = resp.try_into_noun().expect("to noun");
             let expected = Cell::from([
                 Atom::from(req_num).into_noun(),
                 Atom::from(200u8).into_noun(),
