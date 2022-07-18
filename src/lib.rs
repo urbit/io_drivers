@@ -1,10 +1,12 @@
 mod http;
 
+use crate::http::client::HttpClient;
 use std::marker::Unpin;
 use tokio::{
     self,
     io::{self, AsyncReadExt, AsyncWriteExt, ErrorKind},
     sync::mpsc::{self, Receiver, Sender},
+    task::JoinHandle,
 };
 
 type Channel<T> = (Sender<T>, Receiver<T>);
@@ -14,7 +16,18 @@ type RequestTag = u8;
 /// Tag identifying the type of a serialized IO request.
 const HTTP_CLIENT: RequestTag = 0;
 
-/// Read incoming IO requests from some input source.
+/// A generic IO driver.
+trait Driver {
+    /// Spawns a task to asynchronously handle IO requests.
+    ///
+    /// This is the driver entry point.
+    ///
+    /// Handles requests as long as the input channel and sends the responses to the output
+    /// channel.
+    fn run(req_rx: Receiver<Vec<u8>>, resp_tx: Sender<Vec<u8>>) -> JoinHandle<()>;
+}
+
+/// Reads incoming IO requests from an input source.
 async fn recv_io_requests(mut reader: impl AsyncReadExt + Unpin, http_client_tx: Sender<Vec<u8>>) {
     loop {
         let req_len = match reader.read_u64_le().await {
@@ -44,7 +57,7 @@ async fn recv_io_requests(mut reader: impl AsyncReadExt + Unpin, http_client_tx:
     }
 }
 
-/// Read outgoing IO responses from the drivers and write the responses to some output source.
+/// Reads outgoing IO responses from the drivers and writes the responses to an output source.
 async fn send_io_responses(mut writer: impl AsyncWriteExt + Unpin, mut resp_rx: Receiver<Vec<u8>>) {
     while let Some(mut resp) = resp_rx.recv().await {
         let len = u64::try_from(resp.len()).unwrap();
@@ -60,7 +73,22 @@ async fn send_io_responses(mut writer: impl AsyncWriteExt + Unpin, mut resp_rx: 
     }
 }
 
-/// Library entry point.
+/// Asynchronously handles IO requests.
+///
+/// This is the library entry point.
+///
+/// Reads incoming IO requests from `stdin`, which are of the following form:
+/// ```text
+/// jammed request length (8  bytes, little endian)
+/// request type tag      (1  byte)
+/// jammed request        (>1 bytes)
+/// ```
+///
+/// The jammed request is dispatched to the appropriate driver based off the request type tag in
+/// the IO request. Once the driver handles the request, it writes the response to `stdout`.
+///
+/// The following drivers are currently supported:
+/// - HTTP client.
 #[tokio::main(flavor = "current_thread")]
 pub async fn run() {
     // TODO: decide if there's a better upper bound for number of unscheduled requests.
@@ -72,7 +100,7 @@ pub async fn run() {
 
     // scheduling task -> http client driver task
     let (http_client_tx, http_client_rx): Channel<Vec<u8>> = mpsc::channel(QUEUE_SIZE);
-    let http_client_task = tokio::spawn(http::client::run(http_client_rx, resp_tx));
+    let http_client_task = HttpClient::run(http_client_rx, resp_tx);
 
     // input task -> scheduling task
     let input_task = tokio::spawn(recv_io_requests(io::stdin(), http_client_tx));

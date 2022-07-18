@@ -1,3 +1,4 @@
+use crate::Driver;
 use hyper::{
     body::{self, Bytes},
     client::{Client, HttpConnector},
@@ -14,7 +15,10 @@ use noun::{
 };
 use rustls::ClientConfig;
 use std::future::Future;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::{
+    sync::mpsc::{Receiver, Sender},
+    task::JoinHandle,
+};
 
 type HyperClient = Client<HttpsConnector<HttpConnector>, Body>;
 
@@ -103,10 +107,6 @@ struct Response {
     body: Bytes,
 }
 
-/// Need
-/// - status as u32,
-/// - headers as noun,
-/// - body as noun,
 impl TryIntoNoun<Noun> for Response {
     type Error = ();
 
@@ -205,27 +205,35 @@ fn handle_io_request(
     }
 }
 
-/// HTTP client driver entry point.
-pub async fn run(mut req_rx: Receiver<Vec<u8>>, resp_tx: Sender<Vec<u8>>) {
-    let client: HyperClient = {
-        let tls = ClientConfig::builder()
-            .with_safe_defaults()
-            .with_native_roots()
-            .with_no_client_auth();
+#[doc(hidden)]
+pub struct HttpClient;
 
-        let https = HttpsConnectorBuilder::new()
-            .with_tls_config(tls)
-            .https_or_http()
-            .enable_http1()
-            .build();
+impl Driver for HttpClient {
+    fn run(mut req_rx: Receiver<Vec<u8>>, resp_tx: Sender<Vec<u8>>) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            let client: HyperClient = {
+                let tls = ClientConfig::builder()
+                    .with_safe_defaults()
+                    .with_native_roots()
+                    .with_no_client_auth();
 
-        Client::builder().build(https)
-    };
+                let https = HttpsConnectorBuilder::new()
+                    .with_tls_config(tls)
+                    .https_or_http()
+                    .enable_http1()
+                    .build();
 
-    while let Some(req) = req_rx.recv().await {
-        let client_clone = client.clone();
-        let resp_tx_clone = resp_tx.clone();
-        tokio::spawn(async move { handle_io_request(client_clone, req, resp_tx_clone)?.await });
+                Client::builder().build(https)
+            };
+
+            while let Some(req) = req_rx.recv().await {
+                let client_clone = client.clone();
+                let resp_tx_clone = resp_tx.clone();
+                tokio::spawn(
+                    async move { handle_io_request(client_clone, req, resp_tx_clone)?.await },
+                );
+            }
+        })
     }
 }
 
