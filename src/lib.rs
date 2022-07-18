@@ -29,9 +29,8 @@ async fn recv_io_requests(mut reader: impl AsyncReadExt + Unpin, http_client_tx:
             Ok(req_tag) => req_tag,
             Err(_err) => todo!("handle error"),
         };
-        // TODO: don't count the tag in the request length when sending from C side.
-        let mut req = Vec::with_capacity(req_len - 1);
-        req.resize(req_len - 1, 0); // XX: replace req_len - 1 with req.capacity().
+        let mut req = Vec::with_capacity(req_len);
+        req.resize(req.capacity(), 0);
         match reader.read_exact(&mut req).await {
             Ok(_) => match req_tag {
                 HTTP_CLIENT => {
@@ -102,7 +101,7 @@ mod tests {
     fn recv_io_requests() {
         async_test!({
             const REQ: [u8; 14] = [
-                6, 0, 0, 0, 0, 0, 0, 0, // Tag.
+                5, 0, 0, 0, 0, 0, 0, 0, // Tag.
                 0, // Payload.
                 b'h', b'e', b'l', b'l', b'o',
             ];

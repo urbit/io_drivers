@@ -8,7 +8,7 @@ use hyper_rustls::{ConfigBuilderExt, HttpsConnector, HttpsConnectorBuilder};
 use noun::{
     atom::Atom,
     cell::Cell,
-    convert::{self, TryFromNoun, TryIntoNoun},
+    convert::{self, IntoNoun, TryFromNoun, TryIntoNoun},
     serdes::{Cue, Jam},
     Noun, Rc,
 };
