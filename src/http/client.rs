@@ -113,7 +113,7 @@ impl TryIntoNoun<Noun> for Response {
     fn try_into_noun(self) -> Result<Noun, ()> {
         let req_num = Atom::from(self.req_num).into_rc_noun();
         let status = Atom::from(self.parts.status.as_u16()).into_rc_noun();
-        let null = Atom::from(0u8).into_rc_noun();
+        let null = Atom::null().into_rc_noun();
 
         let headers = {
             let mut headers_cell = null.clone();
