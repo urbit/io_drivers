@@ -1,6 +1,11 @@
 mod http;
 
 use crate::http::client::HttpClient;
+use noun::{
+    atom::Atom,
+    serdes::{Cue, Jam},
+    Noun,
+};
 use std::marker::Unpin;
 use tokio::{
     self,
@@ -25,11 +30,11 @@ trait Driver: Sized {
     ///
     /// Handles requests as long as the input channel is open and sends the responses to the output
     /// channel.
-    fn run(req_rx: Receiver<Vec<u8>>, resp_tx: Sender<Vec<u8>>) -> JoinHandle<()>;
+    fn run(req_rx: Receiver<Noun>, resp_tx: Sender<Vec<u8>>) -> JoinHandle<()>;
 }
 
 /// Reads incoming IO requests from an input source.
-async fn recv_io_requests(mut reader: impl AsyncReadExt + Unpin, http_client_tx: Sender<Vec<u8>>) {
+async fn recv_io_requests(mut reader: impl AsyncReadExt + Unpin, http_client_tx: Sender<Noun>) {
     loop {
         let req_len = match reader.read_u64_le().await {
             Ok(0) => break,
@@ -49,6 +54,7 @@ async fn recv_io_requests(mut reader: impl AsyncReadExt + Unpin, http_client_tx:
             Ok(_) => match req_tag {
                 HTTP_CLIENT => {
                     // TODO: better error handling.
+                    let req = Noun::cue(Atom::from(req)).unwrap();
                     http_client_tx.send(req).await.unwrap();
                 }
                 _ => todo!(),
@@ -119,7 +125,7 @@ pub fn run() {
         let output_task = tokio::spawn(send_io_responses(io::stdout(), resp_rx));
 
         // scheduling task -> http client driver task
-        let (http_client_tx, http_client_rx): Channel<Vec<u8>> = mpsc::channel(QUEUE_SIZE);
+        let (http_client_tx, http_client_rx): Channel<Noun> = mpsc::channel(QUEUE_SIZE);
         let http_client_task = HttpClient::run(http_client_rx, resp_tx);
 
         // input task -> scheduling task
@@ -145,19 +151,22 @@ mod tests {
     #[test]
     fn recv_io_requests() {
         async_test!({
-            const REQ: [u8; 14] = [
-                5, 0, 0, 0, 0, 0, 0, 0, // Tag.
-                0, // Payload.
-                b'h', b'e', b'l', b'l', b'o',
+            const REQ: [u8; 16] = [
+                7, 0, 0, 0, 0, 0, 0, 0, // Length.
+                0, // Tag.
+                128, 7, 173, 140, 141, 237, 13, // (%jam hello)
             ];
+
             let reader = BufReader::new(&REQ[..]);
-            let (req_tx, mut req_rx): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = mpsc::channel(8);
+            let (req_tx, mut req_rx): Channel<Noun> = mpsc::channel(8);
 
             tokio::spawn(super::recv_io_requests(reader, req_tx));
 
-            let req = req_rx.recv().await.unwrap();
-            let req = String::from_utf8(req).unwrap();
-            assert_eq!(req, "hello");
+            if let Noun::Atom(req) = req_rx.recv().await.expect("recv") {
+                assert_eq!(req, "hello");
+            } else {
+                panic!("unexpected cell");
+            }
         });
     }
 

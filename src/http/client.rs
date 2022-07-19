@@ -10,7 +10,7 @@ use noun::{
     atom::Atom,
     cell::Cell,
     convert::{self, IntoNoun, TryFromNoun, TryIntoNoun},
-    serdes::{Cue, Jam},
+    serdes::Jam,
     Noun, Rc,
 };
 use rustls::ClientConfig;
@@ -187,7 +187,7 @@ impl HttpClient {
 }
 
 impl Driver for HttpClient {
-    fn run(mut req_rx: Receiver<Vec<u8>>, resp_tx: Sender<Vec<u8>>) -> JoinHandle<()> {
+    fn run(mut req_rx: Receiver<Noun>, resp_tx: Sender<Vec<u8>>) -> JoinHandle<()> {
         tokio::spawn(async move {
             let driver = {
                 let tls = ClientConfig::builder()
@@ -209,13 +209,11 @@ impl Driver for HttpClient {
                 let driver_clone = driver.clone();
                 let resp_tx_clone = resp_tx.clone();
                 tokio::spawn(async move {
-                    if let Ok(req) = Noun::cue(Atom::from(req)) {
-                        if let Some(resp) = driver_clone.handle_http_request(req).await {
-                            resp_tx_clone
-                                .send(resp.jam().into_vec())
-                                .await
-                                .expect("send");
-                        }
+                    if let Some(resp) = driver_clone.handle_http_request(req).await {
+                        resp_tx_clone
+                            .send(resp.jam().into_vec())
+                            .await
+                            .expect("send");
                     }
                 });
             }
