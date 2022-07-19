@@ -30,7 +30,7 @@ trait Driver: Sized {
     ///
     /// Handles requests as long as the input channel is open and sends the responses to the output
     /// channel.
-    fn run(req_rx: Receiver<Noun>, resp_tx: Sender<Vec<u8>>) -> JoinHandle<()>;
+    fn run(req_rx: Receiver<Noun>, resp_tx: Sender<Noun>) -> JoinHandle<()>;
 }
 
 /// Reads incoming IO requests from an input source.
@@ -65,8 +65,9 @@ async fn recv_io_requests(mut reader: impl AsyncReadExt + Unpin, http_client_tx:
 }
 
 /// Reads outgoing IO responses from the drivers and writes the responses to an output source.
-async fn send_io_responses(mut writer: impl AsyncWriteExt + Unpin, mut resp_rx: Receiver<Vec<u8>>) {
-    while let Some(mut resp) = resp_rx.recv().await {
+async fn send_io_responses(mut writer: impl AsyncWriteExt + Unpin, mut resp_rx: Receiver<Noun>) {
+    while let Some(resp) = resp_rx.recv().await {
+        let mut resp = resp.jam().into_vec();
         let len = u64::try_from(resp.len()).unwrap();
         if let Err(_) = writer.write_u64_le(len).await {
             todo!("handle error");
@@ -121,7 +122,7 @@ pub fn run() {
         const QUEUE_SIZE: usize = 32;
 
         // driver tasks -> output task
-        let (resp_tx, resp_rx): Channel<Vec<u8>> = mpsc::channel(QUEUE_SIZE);
+        let (resp_tx, resp_rx): Channel<Noun> = mpsc::channel(QUEUE_SIZE);
         let output_task = tokio::spawn(send_io_responses(io::stdout(), resp_rx));
 
         // scheduling task -> http client driver task
@@ -152,9 +153,22 @@ mod tests {
     fn recv_io_requests() {
         async_test!({
             const REQ: [u8; 16] = [
-                7, 0, 0, 0, 0, 0, 0, 0, // Length.
-                0, // Tag.
-                128, 7, 173, 140, 141, 237, 13, // (%jam hello)
+                7,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,           // Length of (jam %hello).
+                HTTP_CLIENT, // Tag.
+                128,
+                7,
+                173,
+                140,
+                141,
+                237,
+                13, // (%jam hello)
             ];
 
             let reader = BufReader::new(&REQ[..]);
@@ -169,7 +183,4 @@ mod tests {
             }
         });
     }
-
-    #[test]
-    fn send_io_responses() {}
 }
