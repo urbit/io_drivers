@@ -13,12 +13,13 @@ use noun::{
     Noun, Rc,
 };
 use rustls::ClientConfig;
-use std::sync::Arc;
+use std::collections::HashMap;
 use tokio::{
     sync::mpsc::{Receiver, Sender},
     task::JoinHandle,
 };
 
+/// An HTTP request.
 struct Request {
     req_num: u64,
     req: HyperRequest<Body>,
@@ -98,6 +99,7 @@ impl TryFromNoun<Rc<Noun>> for Request {
     }
 }
 
+/// An HTTP response.
 struct Response {
     req_num: u64,
     parts: Parts,
@@ -146,72 +148,85 @@ impl TryIntoNoun<Noun> for Response {
     }
 }
 
+/// The HTTP client driver.
 pub struct HttpClient {
     hyper: Client<HttpsConnector<HttpConnector>, Body>,
+    /// Map from request number to request task. Must only be accessed from a single task.
+    inflight_req: HashMap<u64, JoinHandle<()>>,
 }
 
 impl HttpClient {
-    /// Handle an HTTP request, returning `None` if an error occurred or if no response is needed.
-    async fn handle_http_request(&self, req: Noun) -> Option<Noun> {
-        let (tag, req) = if let Noun::Cell(req) = req {
-            req.into_parts()
-        } else {
-            return None;
-        };
+    /// Sends an HTTP request, writing the reponse to the output channel.
+    fn send_request(&mut self, req: Rc<Noun>, resp_tx: Sender<Noun>) {
+        let req = Request::try_from_noun(req).expect("request from noun");
+        let req_num = req.req_num;
+        let task = {
+            let hyper = self.hyper.clone();
+            tokio::spawn(async move {
+                let resp = hyper.request(req.req).await.expect("send request");
+                let (parts, body) = resp.into_parts();
 
-        if let Noun::Atom(tag) = &*tag {
-            let req = Request::try_from_noun(req).unwrap();
-            match tag.as_str() {
-                Ok("request") => {
-                    let resp = self.hyper.request(req.req).await.ok()?;
-                    let (parts, body) = resp.into_parts();
+                let body = body::to_bytes(body).await.expect("wait for body");
 
-                    let body = body::to_bytes(body).await.ok()?;
-
-                    Response {
-                        req_num: req.req_num,
-                        parts,
-                        body,
-                    }
-                    .try_into_noun()
-                    .ok()
+                let resp = Response {
+                    req_num: req.req_num,
+                    parts,
+                    body,
                 }
-                Ok("cancel-request") => todo!("cancel request"),
-                _ => todo!("handle error"),
+                .try_into_noun()
+                .expect("response into noun");
+                resp_tx.send(resp).await.expect("send response");
+            })
+        };
+        self.inflight_req.insert(req_num, task);
+    }
+
+    /// Cancels an inflight HTTP request.
+    fn cancel_request(&mut self, req: Rc<Noun>) {
+        if let Noun::Atom(req_num) = &*req {
+            if let Some(req_num) = req_num.as_u64() {
+                if let Some(task) = self.inflight_req.remove(&req_num) {
+                    task.abort();
+                }
             }
-        } else {
-            None
         }
     }
 }
 
 impl Driver for HttpClient {
-    fn run(mut req_rx: Receiver<Noun>, resp_tx: Sender<Noun>) -> JoinHandle<()> {
+    fn new() -> Self {
+        let tls = ClientConfig::builder()
+            .with_safe_defaults()
+            .with_native_roots()
+            .with_no_client_auth();
+
+        let https = HttpsConnectorBuilder::new()
+            .with_tls_config(tls)
+            .https_or_http()
+            .enable_http1()
+            .build();
+
+        let hyper = Client::builder().build(https);
+        let inflight_req = HashMap::new();
+        Self {
+            hyper,
+            inflight_req,
+        }
+    }
+
+    fn run(mut self, mut req_rx: Receiver<Noun>, resp_tx: Sender<Noun>) -> JoinHandle<()> {
         tokio::spawn(async move {
-            let driver = {
-                let tls = ClientConfig::builder()
-                    .with_safe_defaults()
-                    .with_native_roots()
-                    .with_no_client_auth();
-
-                let https = HttpsConnectorBuilder::new()
-                    .with_tls_config(tls)
-                    .https_or_http()
-                    .enable_http1()
-                    .build();
-
-                let hyper = Client::builder().build(https);
-                Arc::new(Self { hyper })
-            };
-
             while let Some(req) = req_rx.recv().await {
-                let driver_clone = driver.clone();
-                let resp_tx_clone = resp_tx.clone();
-                tokio::spawn(async move {
-                    if let Some(resp) = driver_clone.handle_http_request(req).await {
-                        resp_tx_clone.send(resp).await.expect("send");
+                if let Noun::Cell(req) = req {
+                    let (tag, req) = req.into_parts();
+                    if let Noun::Atom(tag) = &*tag {
+                        if tag == "request" {
+                            self.send_request(req, resp_tx.clone());
+                        } else if tag == "cancel-request" {
+                            self.cancel_request(req);
+                        }
                     }
-                });
+                }
             }
         })
     }

@@ -24,13 +24,16 @@ const HTTP_CLIENT: RequestTag = 0;
 
 /// A generic IO driver.
 trait Driver: Sized {
+    /// Initializes a new driver.
+    fn new() -> Self;
+
     /// Spawns a task to asynchronously handle IO requests.
     ///
     /// This is the driver entry point.
     ///
     /// Handles requests as long as the input channel is open and sends the responses to the output
     /// channel.
-    fn run(req_rx: Receiver<Noun>, resp_tx: Sender<Noun>) -> JoinHandle<()>;
+    fn run(self, req_rx: Receiver<Noun>, resp_tx: Sender<Noun>) -> JoinHandle<()>;
 }
 
 /// Reads incoming IO requests from an input source.
@@ -127,7 +130,7 @@ pub fn run() {
 
         // scheduling task -> http client driver task
         let (http_client_tx, http_client_rx): Channel<Noun> = mpsc::channel(QUEUE_SIZE);
-        let http_client_task = HttpClient::run(http_client_rx, resp_tx);
+        let http_client_task = HttpClient::new().run(http_client_rx, resp_tx);
 
         // input task -> scheduling task
         let input_task = tokio::spawn(recv_io_requests(io::stdin(), http_client_tx));
