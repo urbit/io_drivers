@@ -5,11 +5,11 @@ edition = "2021"
 
 [features]
 default = ["multi-thread"]
-multi-thread = ["noun/thread-safe", "tokio/rt-multi-thread"]
+multi-thread = ["tokio/rt-multi-thread"]
 
 [dependencies]
 hyper = { version = "0.14", features = ["client"] }
 hyper-rustls = { version = "0.23" }
-noun = { path = "../noun" }
+noun = { path = "../noun", features = ["thread-safe"] }
 rustls = { version = "0.20" }
 tokio = { version = "1", features = ["io-std", "io-util"] }

@@ -18,12 +18,12 @@ type RequestTag = u8;
 const HTTP_CLIENT: RequestTag = 0;
 
 /// A generic IO driver.
-trait Driver {
+trait Driver: Sized {
     /// Spawns a task to asynchronously handle IO requests.
     ///
     /// This is the driver entry point.
     ///
-    /// Handles requests as long as the input channel and sends the responses to the output
+    /// Handles requests as long as the input channel is open and sends the responses to the output
     /// channel.
     fn run(req_rx: Receiver<Vec<u8>>, resp_tx: Sender<Vec<u8>>) -> JoinHandle<()>;
 }

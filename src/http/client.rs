@@ -14,13 +14,11 @@ use noun::{
     Noun, Rc,
 };
 use rustls::ClientConfig;
-use std::future::Future;
+use std::sync::Arc;
 use tokio::{
     sync::mpsc::{Receiver, Sender},
     task::JoinHandle,
 };
-
-type HyperClient = Client<HttpsConnector<HttpConnector>, Body>;
 
 struct Request {
     req_num: u64,
@@ -149,69 +147,49 @@ impl TryIntoNoun<Noun> for Response {
     }
 }
 
-/// Send an HTTP request and receive its response.
-async fn send_http_request(
-    client: HyperClient,
-    req: Request,
-    resp_tx: Sender<Vec<u8>>,
-) -> Option<()> {
-    // Send request and receive response.
-    let resp = client.request(req.req).await.ok()?;
-    let (parts, body) = resp.into_parts();
-
-    // Wait for the entire response body to come in.
-    let body = body::to_bytes(body).await.ok()?;
-
-    let req_num = req.req_num;
-    let resp = Response {
-        req_num,
-        parts,
-        body,
-    }
-    .try_into_noun()
-    .ok()?
-    .jam()
-    .into_vec();
-    resp_tx.send(resp).await.ok()?;
-    Some(())
+pub struct HttpClient {
+    hyper: Client<HttpsConnector<HttpConnector>, Body>,
 }
 
-/// This has to be synchronous because Noun is not Send.
-fn handle_io_request(
-    client: HyperClient,
-    req: Vec<u8>,
-    resp_tx: Sender<Vec<u8>>,
-) -> Option<impl Future<Output = Option<()>>> {
-    let (tag, req) = {
-        let noun = Noun::cue(Atom::from(req)).unwrap();
-        if let Noun::Cell(cell) = noun {
-            cell.into_parts()
+impl HttpClient {
+    /// Handle an HTTP request, returning `None` if an error occurred or if no response is needed.
+    async fn handle_http_request(&self, req: Noun) -> Option<Noun> {
+        let (tag, req) = if let Noun::Cell(req) = req {
+            req.into_parts()
         } else {
-            todo!("handle error")
-        }
-    };
+            return None;
+        };
 
-    if let Noun::Atom(tag) = &*tag {
-        match tag.as_str() {
-            Ok("request") => {
-                let req = Request::try_from_noun(req).unwrap();
-                Some(send_http_request(client, req, resp_tx))
+        if let Noun::Atom(tag) = &*tag {
+            let req = Request::try_from_noun(req).unwrap();
+            match tag.as_str() {
+                Ok("request") => {
+                    let resp = self.hyper.request(req.req).await.ok()?;
+                    let (parts, body) = resp.into_parts();
+
+                    let body = body::to_bytes(body).await.ok()?;
+
+                    Response {
+                        req_num: req.req_num,
+                        parts,
+                        body,
+                    }
+                    .try_into_noun()
+                    .ok()
+                }
+                Ok("cancel-request") => todo!("cancel request"),
+                _ => todo!("handle error"),
             }
-            Ok("cancel-request") => todo!("cancel request"),
-            _ => todo!("handle error"),
+        } else {
+            None
         }
-    } else {
-        None
     }
 }
-
-#[doc(hidden)]
-pub struct HttpClient;
 
 impl Driver for HttpClient {
     fn run(mut req_rx: Receiver<Vec<u8>>, resp_tx: Sender<Vec<u8>>) -> JoinHandle<()> {
         tokio::spawn(async move {
-            let client: HyperClient = {
+            let driver = {
                 let tls = ClientConfig::builder()
                     .with_safe_defaults()
                     .with_native_roots()
@@ -223,15 +201,23 @@ impl Driver for HttpClient {
                     .enable_http1()
                     .build();
 
-                Client::builder().build(https)
+                let hyper = Client::builder().build(https);
+                Arc::new(Self { hyper })
             };
 
             while let Some(req) = req_rx.recv().await {
-                let client_clone = client.clone();
+                let driver_clone = driver.clone();
                 let resp_tx_clone = resp_tx.clone();
-                tokio::spawn(
-                    async move { handle_io_request(client_clone, req, resp_tx_clone)?.await },
-                );
+                tokio::spawn(async move {
+                    if let Ok(req) = Noun::cue(Atom::from(req)) {
+                        if let Some(resp) = driver_clone.handle_http_request(req).await {
+                            resp_tx_clone
+                                .send(resp.jam().into_vec())
+                                .await
+                                .expect("send");
+                        }
+                    }
+                });
             }
         })
     }
