@@ -5,6 +5,7 @@ use std::marker::Unpin;
 use tokio::{
     self,
     io::{self, AsyncReadExt, AsyncWriteExt, ErrorKind},
+    runtime::{self, Runtime},
     sync::mpsc::{self, Receiver, Sender},
     task::JoinHandle,
 };
@@ -73,6 +74,25 @@ async fn send_io_responses(mut writer: impl AsyncWriteExt + Unpin, mut resp_rx: 
     }
 }
 
+/// Constructs a [tokio] runtime.
+///
+/// [tokio]: https://docs.rs/tokio/latest/tokio/index.html
+fn runtime() -> Runtime {
+    {
+        #[cfg(feature = "multi-thread")]
+        {
+            runtime::Builder::new_multi_thread()
+        }
+        #[cfg(not(feature = "multi-thread"))]
+        {
+            runtime::Builder::new_current_thread()
+        }
+    }
+    .enable_all()
+    .build()
+    .unwrap()
+}
+
 /// Asynchronously handles IO requests.
 ///
 /// This is the library entry point.
@@ -89,25 +109,26 @@ async fn send_io_responses(mut writer: impl AsyncWriteExt + Unpin, mut resp_rx: 
 ///
 /// The following drivers are currently supported:
 /// - HTTP client.
-#[tokio::main(flavor = "current_thread")]
-pub async fn run() {
-    // TODO: decide if there's a better upper bound for number of unscheduled requests.
-    const QUEUE_SIZE: usize = 32;
+pub fn run() {
+    runtime().block_on(async {
+        // TODO: decide if there's a better upper bound for number of unscheduled requests.
+        const QUEUE_SIZE: usize = 32;
 
-    // driver tasks -> output task
-    let (resp_tx, resp_rx): Channel<Vec<u8>> = mpsc::channel(QUEUE_SIZE);
-    let output_task = tokio::spawn(send_io_responses(io::stdout(), resp_rx));
+        // driver tasks -> output task
+        let (resp_tx, resp_rx): Channel<Vec<u8>> = mpsc::channel(QUEUE_SIZE);
+        let output_task = tokio::spawn(send_io_responses(io::stdout(), resp_rx));
 
-    // scheduling task -> http client driver task
-    let (http_client_tx, http_client_rx): Channel<Vec<u8>> = mpsc::channel(QUEUE_SIZE);
-    let http_client_task = HttpClient::run(http_client_rx, resp_tx);
+        // scheduling task -> http client driver task
+        let (http_client_tx, http_client_rx): Channel<Vec<u8>> = mpsc::channel(QUEUE_SIZE);
+        let http_client_task = HttpClient::run(http_client_rx, resp_tx);
 
-    // input task -> scheduling task
-    let input_task = tokio::spawn(recv_io_requests(io::stdin(), http_client_tx));
+        // input task -> scheduling task
+        let input_task = tokio::spawn(recv_io_requests(io::stdin(), http_client_tx));
 
-    input_task.await.unwrap();
-    http_client_task.await.unwrap();
-    output_task.await.unwrap();
+        input_task.await.unwrap();
+        http_client_task.await.unwrap();
+        output_task.await.unwrap();
+    });
 }
 
 #[cfg(test)]
@@ -117,11 +138,7 @@ mod tests {
 
     macro_rules! async_test {
         ($async_block:block) => {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap()
-                .block_on(async { $async_block });
+            runtime().block_on(async { $async_block });
         };
     }
 

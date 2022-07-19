@@ -3,9 +3,13 @@ name = "io"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["multi-thread"]
+multi-thread = ["noun/thread-safe", "tokio/rt-multi-thread"]
+
 [dependencies]
 hyper = { version = "0.14", features = ["client"] }
-hyper-rustls = "0.23"
+hyper-rustls = { version = "0.23" }
 noun = { path = "../noun" }
-rustls = "0.20"
-tokio = { version = "1", features = ["io-std", "io-util", "macros", "rt"] }
+rustls = { version = "0.20" }
+tokio = { version = "1", features = ["io-std", "io-util"] }
