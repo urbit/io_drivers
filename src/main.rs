@@ -1,3 +1,3 @@
-fn main() {
-    io::run();
+fn main() -> io::Status {
+    io::run()
 }

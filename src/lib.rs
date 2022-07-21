@@ -6,7 +6,10 @@ use noun::{
     serdes::{Cue, Jam},
     Noun,
 };
-use std::marker::Unpin;
+use std::{
+    marker::Unpin,
+    process::{ExitCode, Termination},
+};
 use tokio::{
     self,
     io::{self, AsyncReadExt, AsyncWriteExt, ErrorKind},
@@ -21,6 +24,24 @@ type RequestTag = u8;
 
 /// Tag identifying the type of a serialized IO request.
 const HTTP_CLIENT: RequestTag = 0;
+
+/// The return status of the crate.
+#[repr(u8)]
+pub enum Status {
+    Success = 0,
+    /// Reading IO requests from stdin failed.
+    ReadFailed = 1,
+    /// Writing IO responses to stdout failed.
+    WriteFailed = 2,
+    /// The HTTP client driver failed.
+    HttpClientFailed = 3,
+}
+
+impl Termination for Status {
+    fn report(self) -> ExitCode {
+        ExitCode::from(self as u8)
+    }
+}
 
 /// A generic IO driver.
 trait Driver: Sized {
@@ -119,7 +140,7 @@ fn runtime() -> Runtime {
 ///
 /// The following drivers are currently supported:
 /// - HTTP client.
-pub fn run() {
+pub fn run() -> Status {
     runtime().block_on(async {
         // TODO: decide if there's a better upper bound for number of unscheduled requests.
         const QUEUE_SIZE: usize = 32;
@@ -138,7 +159,8 @@ pub fn run() {
         input_task.await.unwrap();
         http_client_task.await.unwrap();
         output_task.await.unwrap();
-    });
+        Status::Success
+    })
 }
 
 #[cfg(test)]
