@@ -64,7 +64,11 @@ jobs:
           profile: minimal
           toolchain: ${{ matrix.rust }}
           override: true
-      - name: Test
+      - name: Test single-threaded
         uses: actions-rs/cargo@v1
         with:
-          command: test
+          command: test --no-default-features
+      - name: Test multi-threaded
+        uses: actions-rs/cargo@v1
+        with:
+            command: test --no-default-features --features multi-thread

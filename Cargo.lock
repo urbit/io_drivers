@@ -243,6 +243,7 @@ dependencies = [
 [[package]]
 name = "noun"
 version = "0.1.0"
+source = "git+https://github.com/mcevoypeter/noun.git#2393d9cc857a8024f2c28d37e9f5f2a253e63700"
 
 [[package]]
 name = "num_cpus"
