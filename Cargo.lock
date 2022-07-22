@@ -180,6 +180,7 @@ version = "0.1.0"
 dependencies = [
  "hyper",
  "hyper-rustls",
+ "log",
  "noun",
  "rustls",
  "tokio",

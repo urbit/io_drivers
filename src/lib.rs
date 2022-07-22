@@ -1,13 +1,14 @@
 mod http;
 
 use crate::http::client::HttpClient;
+use log::{debug, error, info, warn};
 use noun::{
     atom::Atom,
     serdes::{Cue, Jam},
     Noun,
 };
 use std::{
-    marker::Unpin,
+    marker::{Send, Unpin},
     process::{ExitCode, Termination},
 };
 use tokio::{
@@ -26,6 +27,7 @@ type RequestTag = u8;
 const HTTP_CLIENT: RequestTag = 0;
 
 /// The return status of the crate.
+#[derive(PartialEq)]
 #[repr(u8)]
 pub enum Status {
     Success = 0,
@@ -35,6 +37,12 @@ pub enum Status {
     WriteFailed = 2,
     /// The HTTP client driver failed.
     HttpClientFailed = 3,
+}
+
+impl Status {
+    fn success(&self) -> bool {
+        *self == Status::Success
+    }
 }
 
 impl Termination for Status {
@@ -54,55 +62,130 @@ trait Driver: Sized {
     ///
     /// Handles requests as long as the input channel is open and sends the responses to the output
     /// channel.
-    fn run(self, req_rx: Receiver<Noun>, resp_tx: Sender<Noun>) -> JoinHandle<()>;
+    fn run(self, req_rx: Receiver<Noun>, resp_tx: Sender<Noun>) -> JoinHandle<Status>;
 }
 
 /// Reads incoming IO requests from an input source.
-async fn recv_io_requests(mut reader: impl AsyncReadExt + Unpin, http_client_tx: Sender<Noun>) {
-    loop {
-        let req_len = match reader.read_u64_le().await {
-            Ok(0) => break,
-            Ok(req_len) => usize::try_from(req_len).expect("u64 to usize"),
-            Err(err) => match err.kind() {
-                ErrorKind::UnexpectedEof => break,
-                _ => todo!(),
-            },
-        };
-        let req_tag = match reader.read_u8().await {
-            Ok(req_tag) => req_tag,
-            Err(_err) => todo!("handle error"),
-        };
-        let mut req = Vec::with_capacity(req_len);
-        req.resize(req.capacity(), 0);
-        match reader.read_exact(&mut req).await {
-            Ok(_) => match req_tag {
-                HTTP_CLIENT => {
-                    // TODO: better error handling.
-                    let req = Noun::cue(Atom::from(req)).unwrap();
-                    http_client_tx.send(req).await.unwrap();
+fn recv_io_requests(
+    mut reader: impl AsyncReadExt + Send + Unpin + 'static,
+    http_client_tx: Sender<Noun>,
+) -> JoinHandle<Status> {
+    let task = tokio::spawn(async move {
+        loop {
+            let req_len = match reader.read_u64_le().await {
+                Ok(0) => {
+                    info!(target: "io-drivers:stdin", "encountered EOF");
+                    return Status::Success;
                 }
-                _ => todo!(),
-            },
-            Err(_) => todo!("handle error"),
+                Ok(req_len) => {
+                    if let Ok(req_len) = usize::try_from(req_len) {
+                        req_len
+                    } else {
+                        error!(target: "io-drivers:stdin", "request length {} does not fit in usize", req_len);
+                        return Status::ReadFailed;
+                    }
+                }
+                Err(err) => match err.kind() {
+                    ErrorKind::UnexpectedEof => {
+                        info!(target: "io-drivers:stdin", "encountered EOF");
+                        return Status::Success;
+                    }
+                    err => {
+                        error!(target: "io-drivers:stdin", "failed to read request length: {}", err);
+                        return Status::ReadFailed;
+                    }
+                },
+            };
+            debug!(target: "io-drivers:stdin", "request length = {}", req_len);
+
+            let req_tag = match reader.read_u8().await {
+                Ok(req_tag) => req_tag,
+                Err(err) => {
+                    error!(target: "io-drivers:stdin", "failed to read request tag: {}", err);
+                    return Status::ReadFailed;
+                }
+            };
+            debug!(target: "io-drivers:stdin", "request tag = {}", req_tag);
+
+            let req = {
+                let mut req = Vec::with_capacity(req_len);
+                req.resize(req.capacity(), 0);
+                if let Err(err) = reader.read_exact(&mut req).await {
+                    error!(target: "io-drivers:stdin", "failed to read jammed request of length {}: {}", req_len, err);
+                    return Status::ReadFailed;
+                }
+                Atom::from(req)
+            };
+            debug!(target: "io-drivers:stdin", "request = {}", req);
+
+            match Noun::cue(req) {
+                Ok(req) => match req_tag {
+                    HTTP_CLIENT => {
+                        if let Err(_req) = http_client_tx.send(req).await {
+                            error!(target: "io-drivers:stdin", "failed to send {} request of length {} to HTTP client driver", req_tag, req_len);
+                            return Status::HttpClientFailed;
+                        }
+                    }
+                    _ => warn!(target: "io-drivers:stdin", "unknown request tag {}", req_tag),
+                },
+                Err(err) => {
+                    warn!(target: "io-drivers:stdin", "failed to deserialize {} request of length {}: {:?}", req_tag, req_len, err)
+                }
+            }
         }
-    }
+    });
+    debug!(target: "io-drivers:stdin", "spawned task");
+    task
 }
 
 /// Reads outgoing IO responses from the drivers and writes the responses to an output source.
-async fn send_io_responses(mut writer: impl AsyncWriteExt + Unpin, mut resp_rx: Receiver<Noun>) {
-    while let Some(resp) = resp_rx.recv().await {
-        let mut resp = resp.jam().into_vec();
-        let len = u64::try_from(resp.len()).unwrap();
-        if let Err(_) = writer.write_u64_le(len).await {
-            todo!("handle error");
+fn send_io_responses(
+    mut writer: impl AsyncWriteExt + Send + Unpin + 'static,
+    mut resp_rx: Receiver<Noun>,
+) -> JoinHandle<Status> {
+    let task = tokio::spawn(async move {
+        let mut flush_retry_cnt = 0;
+        const FLUSH_RETRY_MAX: usize = 5;
+        debug!(target: "io-drivers:stdout", "max flush retry attempts = {}", FLUSH_RETRY_MAX);
+        while let Some(resp) = resp_rx.recv().await {
+            let mut resp = resp.jam().into_vec();
+            let resp_len = u64::try_from(resp.len());
+            if let Err(err) = resp_len {
+                warn!(target: "io-drivers:stdout", "response length {} does not fit in u64: {}", resp.len(), err);
+                continue;
+            }
+            let resp_len = resp_len.unwrap();
+            debug!(target: "io-drivers:stdout", "response length = {}", resp_len);
+
+            if let Err(err) = writer.write_u64_le(resp_len).await {
+                error!(target: "io-drivers:stdout", "failed to write response length {}: {}", resp_len, err);
+                return Status::WriteFailed;
+            }
+
+            if let Err(err) = writer.write_all(&mut resp).await {
+                error!(target: "io-drivers:stdout", "failed to write jammed response {}: {}", Atom::from(resp), err);
+                return Status::WriteFailed;
+            }
+            debug!(target: "io-drivers:stdout", "response = {}", Atom::from(resp));
+
+            if let Err(err) = writer.flush().await {
+                warn!(target: "io-drivers:stdout", "failed to flush stdout: {}", err);
+                if flush_retry_cnt == FLUSH_RETRY_MAX {
+                    error!(target: "io-drivers:stdout", "failing after {} of {} flush retries attempted", flush_retry_cnt, FLUSH_RETRY_MAX);
+                    return Status::WriteFailed;
+                } else {
+                    flush_retry_cnt += 1;
+                    info!(target: "io-drivers:stdout", "{} of {} flush retries remaining", FLUSH_RETRY_MAX - flush_retry_cnt, FLUSH_RETRY_MAX);
+                }
+            } else {
+                flush_retry_cnt = 0;
+            }
+            debug!(target: "io-drivers:stdout", "flush retry count = {}", flush_retry_cnt);
         }
-        if let Err(_) = writer.write_all(&mut resp).await {
-            todo!("handle error");
-        }
-        if let Err(_) = writer.flush().await {
-            todo!("handle error");
-        }
-    }
+        Status::Success
+    });
+    debug!(target: "io-drivers:stdout", "spawned task");
+    task
 }
 
 /// Constructs a [tokio] runtime.
@@ -112,10 +195,12 @@ fn runtime() -> Runtime {
     {
         #[cfg(feature = "multi-thread")]
         {
+            debug!(target: "io-drivers:init", "created multi-threaded tokio runtime");
             runtime::Builder::new_multi_thread()
         }
         #[cfg(not(feature = "multi-thread"))]
         {
+            debug!(target: "io-drivers:init", "created single-threaded tokio runtime");
             runtime::Builder::new_current_thread()
         }
     }
@@ -147,19 +232,42 @@ pub fn run() -> Status {
 
         // driver tasks -> output task
         let (resp_tx, resp_rx): Channel<Noun> = mpsc::channel(QUEUE_SIZE);
-        let output_task = tokio::spawn(send_io_responses(io::stdout(), resp_rx));
+        let output_task = send_io_responses(io::stdout(), resp_rx);
 
         // scheduling task -> http client driver task
         let (http_client_tx, http_client_rx): Channel<Noun> = mpsc::channel(QUEUE_SIZE);
         let http_client_task = HttpClient::new().run(http_client_rx, resp_tx);
 
         // input task -> scheduling task
-        let input_task = tokio::spawn(recv_io_requests(io::stdin(), http_client_tx));
+        let input_task = recv_io_requests(io::stdin(), http_client_tx);
 
-        input_task.await.unwrap();
-        http_client_task.await.unwrap();
-        output_task.await.unwrap();
-        Status::Success
+        let input_status = if let Ok(status) = input_task.await {
+            status
+        } else {
+            Status::ReadFailed
+        };
+
+        let http_client_status = if let Ok(status) = http_client_task.await {
+            status
+        } else {
+            Status::HttpClientFailed
+        };
+
+        let output_status = if let Ok(status) = output_task.await {
+            status
+        } else {
+            Status::WriteFailed
+        };
+
+        if !output_status.success() {
+            output_status
+        } else if !input_status.success() {
+            input_status
+        } else if !http_client_status.success() {
+            http_client_status
+        } else {
+            Status::Success
+        }
     })
 }
 
@@ -199,7 +307,7 @@ mod tests {
             let reader = BufReader::new(&REQ[..]);
             let (req_tx, mut req_rx): Channel<Noun> = mpsc::channel(8);
 
-            tokio::spawn(super::recv_io_requests(reader, req_tx));
+            super::recv_io_requests(reader, req_tx);
 
             if let Noun::Atom(req) = req_rx.recv().await.expect("recv") {
                 assert_eq!(req, "hello");

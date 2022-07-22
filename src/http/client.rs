@@ -1,4 +1,4 @@
-use crate::Driver;
+use crate::{Driver, Status};
 use hyper::{
     body::{self, Bytes},
     client::{Client, HttpConnector},
@@ -6,6 +6,7 @@ use hyper::{
     Body, Request as HyperRequest,
 };
 use hyper_rustls::{ConfigBuilderExt, HttpsConnector, HttpsConnectorBuilder};
+use log::{debug, info, warn};
 use noun::{
     atom::Atom,
     cell::Cell,
@@ -20,6 +21,7 @@ use tokio::{
 };
 
 /// An HTTP request.
+#[derive(Debug)]
 struct Request {
     req_num: u64,
     req: HyperRequest<Body>,
@@ -158,25 +160,64 @@ pub struct HttpClient {
 impl HttpClient {
     /// Sends an HTTP request, writing the reponse to the output channel.
     fn send_request(&mut self, req: Rc<Noun>, resp_tx: Sender<Noun>) {
-        let req = Request::try_from_noun(req).expect("request from noun");
+        let req = {
+            let req = Request::try_from_noun(req);
+            if let Err(err) = req {
+                warn!(target: "io-drivers:http:client", "failed to convert request noun into hyper request: {}", err);
+                return;
+            }
+            req.unwrap()
+        };
+        debug!(target: "io-drivers:http:client", "request = {:?}", req);
+
         let req_num = req.req_num;
+        debug!(target: "io-drivers:http:client", "request number = {}", req_num);
         let task = {
             let hyper = self.hyper.clone();
-            tokio::spawn(async move {
-                let resp = hyper.request(req.req).await.expect("send request");
+            let task = tokio::spawn(async move {
+                let resp = match hyper.request(req.req).await {
+                    Ok(resp) => resp,
+                    Err(err) => {
+                        warn!(target: "io-drivers:http:client", "failed to send request #{}: {}", req_num, err);
+                        return;
+                    }
+                };
+                debug!(target: "io-drivers:http:client", "response to request {} = {:?}", req_num, resp);
+
                 let (parts, body) = resp.into_parts();
 
-                let body = body::to_bytes(body).await.expect("wait for body");
+                let body = match body::to_bytes(body).await {
+                    Ok(body) => body,
+                    Err(err) => {
+                        warn!(target: "io-drivers:http:client", "failed to receive entire body of request #{}: {}", req_num, err);
+                        return;
+                    }
+                };
+                debug!(target: "io-drivers:http:client", "response body to request {} = {:?}", req_num, body);
 
-                let resp = Response {
+                info!(target: "io-drivers:http:client", "received status {} in response to request #{}", parts.status.as_u16(), req_num);
+
+                let resp = match (Response {
                     req_num: req.req_num,
                     parts,
                     body,
-                }
+                })
                 .try_into_noun()
-                .expect("response into noun");
-                resp_tx.send(resp).await.expect("send response");
-            })
+                {
+                    Ok(resp) => resp,
+                    Err(err) => {
+                        warn!(target: "io-drivers:http:client", "failed to convert response to request #{} into noun: {:?}", req_num, err);
+                        return;
+                    }
+                };
+                if let Err(_resp) = resp_tx.send(resp).await {
+                    warn!(target: "io-drivers:http:client", "failed to send response to request #{} to stdout task", req_num);
+                } else {
+                    info!(target: "io-drivers:http:client", "sent response to request #{} to stdout task", req_num);
+                }
+            });
+            debug!(target: "io-drivers:http:client", "spawned task to handle request #{}", req_num);
+            task
         };
         self.inflight_req.insert(req_num, task);
     }
@@ -187,8 +228,15 @@ impl HttpClient {
             if let Some(req_num) = req_num.as_u64() {
                 if let Some(task) = self.inflight_req.remove(&req_num) {
                     task.abort();
+                    info!(target: "io-drivers:http:client", "aborted task for request {}", req_num);
+                } else {
+                    warn!(target: "io-drivers:http:client", "no task for request {} found in request cache", req_num);
                 }
+            } else {
+                warn!(target: "io-drivers:http:client", "request number does not fit in u64");
             }
+        } else {
+            warn!(target: "io-drivers:http:client", "ignoring request to cancel existing request because the request number is a cell");
         }
     }
 }
@@ -208,14 +256,15 @@ impl Driver for HttpClient {
 
         let hyper = Client::builder().build(https);
         let inflight_req = HashMap::new();
+        debug!(target: "io-drivers:http:client", "initialized driver");
         Self {
             hyper,
             inflight_req,
         }
     }
 
-    fn run(mut self, mut req_rx: Receiver<Noun>, resp_tx: Sender<Noun>) -> JoinHandle<()> {
-        tokio::spawn(async move {
+    fn run(mut self, mut req_rx: Receiver<Noun>, resp_tx: Sender<Noun>) -> JoinHandle<Status> {
+        let task = tokio::spawn(async move {
             while let Some(req) = req_rx.recv().await {
                 if let Noun::Cell(req) = req {
                     let (tag, req) = req.into_parts();
@@ -224,11 +273,31 @@ impl Driver for HttpClient {
                             self.send_request(req, resp_tx.clone());
                         } else if tag == "cancel-request" {
                             self.cancel_request(req);
+                        } else {
+                            if let Ok(tag) = tag.as_str() {
+                                warn!(target: "io-drivers:http:client", "ignoring request with unknown tag %{}", tag);
+                            } else {
+                                warn!(target: "io-drivers:http:client", "ignoring request with unknown tag");
+                            }
                         }
+                    } else {
+                        warn!(target: "io-drivers:http:client", "ignoring request because the tag is a cell");
                     }
+                } else {
+                    warn!(target: "io-drivers:http:client", "ignoring request because it's an atom");
                 }
             }
-        })
+            for (req_num, task) in self.inflight_req {
+                if let Err(err) = task.await {
+                    warn!(target: "io-drivers:http:client", "request #{} task failed to complete successfully: {}", req_num, err);
+                } else {
+                    info!(target: "io-drivers:http:client", "request #{} task completed successfully", req_num);
+                }
+            }
+            Status::Success
+        });
+        debug!(target: "io-drivers:http:client", "spawned task");
+        task
     }
 }
 
