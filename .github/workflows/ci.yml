@@ -42,7 +42,7 @@ jobs:
         with:
           command: rustdoc
   test:
-    name: Test ${{ matrix.rust }} on ${{ matrix.os }}
+    name: Test using ${{ matrix.rust }} on ${{ matrix.os }} with features [${{ matrix.features }}]
     needs: [style, doc]
     strategy:
       matrix:
@@ -54,6 +54,9 @@ jobs:
           - ubuntu-latest
           - windows-latest
           - macOS-latest
+        features:
+          - "''"
+          - multi-thread
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -64,11 +67,8 @@ jobs:
           profile: minimal
           toolchain: ${{ matrix.rust }}
           override: true
-      - name: Test single-threaded
+      - name: Test
         uses: actions-rs/cargo@v1
         with:
-          command: test --no-default-features
-      - name: Test multi-threaded
-        uses: actions-rs/cargo@v1
-        with:
-            command: test --no-default-features --features multi-thread
+          command: test
+          args: --no-default-features --features ${{ matrix.features }}
