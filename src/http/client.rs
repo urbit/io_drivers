@@ -69,8 +69,14 @@ impl TryFromNoun<Rc<Noun>> for Request {
 
                         if let (Noun::Atom(body_len), Noun::Atom(body)) = (&*body_len, &*body) {
                             let body_len = body_len.as_u64().ok_or(convert::Error::AtomToUint)?;
-                            let body = Body::from(atom_as_str(body)?.to_string());
-                            (body_len, body)
+                            // Ensure trailing null bytes are retained.
+                            let mut body = atom_as_str(body)?.to_string();
+                            let expected_len = usize::try_from(body_len)
+                                .map_err(|_| convert::Error::AtomToUint)?;
+                            while body.len() < expected_len {
+                                body.push('\0');
+                            }
+                            (body_len, Body::from(body))
                         } else {
                             return Err(convert::Error::UnexpectedCell);
                         }
