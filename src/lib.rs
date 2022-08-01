@@ -217,13 +217,15 @@ fn runtime() -> Runtime {
     {
         #[cfg(feature = "multi-thread")]
         {
+            let runtime = runtime::Builder::new_multi_thread();
             debug!(target: "io-drivers:init", "created multi-threaded tokio runtime");
-            runtime::Builder::new_multi_thread()
+            runtime
         }
         #[cfg(not(feature = "multi-thread"))]
         {
+            let runtime = runtime::Builder::new_current_thread();
             debug!(target: "io-drivers:init", "created single-threaded tokio runtime");
-            runtime::Builder::new_current_thread()
+            runtime
         }
     }
     .enable_all()
