@@ -8,6 +8,7 @@ use noun::{
     Noun,
 };
 use std::{
+    fmt::{Display, Error, Formatter},
     marker::{Send, Unpin},
     process::{ExitCode, Termination},
 };
@@ -21,13 +22,8 @@ use tokio::{
 
 type Channel<T> = (Sender<T>, Receiver<T>);
 
-type RequestTag = u8;
-
-/// Tag identifying the type of a serialized IO request.
-const HTTP_CLIENT: RequestTag = 0;
-
 /// The return status of the crate.
-#[derive(PartialEq)]
+#[derive(Eq, PartialEq)]
 #[repr(u8)]
 pub enum Status {
     Success = 0,
@@ -48,6 +44,32 @@ impl Status {
 impl Termination for Status {
     fn report(self) -> ExitCode {
         ExitCode::from(self as u8)
+    }
+}
+
+/// Tag identifying a driver.
+#[derive(Eq, PartialEq)]
+#[repr(u8)]
+pub enum DriverTag {
+    HttpClient = 0,
+}
+
+impl Display for DriverTag {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
+        match self {
+            Self::HttpClient => write!(f, "HTTP client"),
+        }
+    }
+}
+
+impl TryFrom<u8> for DriverTag {
+    type Error = ();
+
+    fn try_from(val: u8) -> Result<Self, ()> {
+        match val {
+            0 => Ok(Self::HttpClient),
+            _ => Err(())
+        }
     }
 }
 
@@ -98,14 +120,14 @@ fn recv_io_requests(
             };
             debug!(target: "io-drivers:input", "request length = {}", req_len);
 
-            let req_tag = match reader.read_u8().await {
-                Ok(req_tag) => req_tag,
+            let driver_tag = match reader.read_u8().await {
+                Ok(driver_tag) => driver_tag,
                 Err(err) => {
-                    error!(target: "io-drivers:input", "failed to read request tag: {}", err);
+                    error!(target: "io-drivers:input", "failed to read driver tag: {}", err);
                     return Status::ReadFailed;
                 }
             };
-            debug!(target: "io-drivers:input", "request tag = {}", req_tag);
+            debug!(target: "io-drivers:input", "driver tag = {}", driver_tag);
 
             let req = {
                 let mut req = Vec::with_capacity(req_len);
@@ -119,17 +141,17 @@ fn recv_io_requests(
             debug!(target: "io-drivers:input", "request = {}", req);
 
             match Noun::cue(req) {
-                Ok(req) => match req_tag {
-                    HTTP_CLIENT => {
+                Ok(req) => match DriverTag::try_from(driver_tag) {
+                    Ok(DriverTag::HttpClient) => {
                         if let Err(_req) = http_client_tx.send(req).await {
-                            error!(target: "io-drivers:input", "failed to send {} request of length {} to HTTP client driver", req_tag, req_len);
+                            error!(target: "io-drivers:input", "failed to send {} request of length {} to HTTP client driver", driver_tag, req_len);
                             return Status::HttpClientFailed;
                         }
                     }
-                    _ => warn!(target: "io-drivers:input", "unknown request tag {}", req_tag),
+                    _ => warn!(target: "io-drivers:input", "unknown driver tag {}", driver_tag),
                 },
                 Err(err) => {
-                    warn!(target: "io-drivers:input", "failed to deserialize {} request of length {}: {:?}", req_tag, req_len, err)
+                    warn!(target: "io-drivers:input", "failed to deserialize {} request of length {}: {}", driver_tag, req_len, err)
                 }
             }
         }
@@ -216,12 +238,12 @@ fn runtime() -> Runtime {
 /// Reads incoming IO requests from `stdin`, which are of the following form:
 /// ```text
 /// jammed request length (8  bytes, little endian)
-/// request type tag      (1  byte)
+/// driver tag            (1  byte)
 /// jammed request        (>1 bytes)
 /// ```
 ///
-/// The jammed request is dispatched to the appropriate driver based off the request type tag in
-/// the IO request. Once the driver handles the request, it writes the response to `stdout`.
+/// The jammed request is dispatched to the appropriate driver based off the driver tag in the IO
+/// request. Once the driver handles the request, it writes the response to `stdout`.
 ///
 /// The following drivers are currently supported:
 /// - HTTP client.
@@ -295,7 +317,7 @@ mod tests {
                 0,
                 0,
                 0,           // Length of (jam %hello).
-                HTTP_CLIENT, // Tag.
+                DriverTag::HttpClient as u8, // Tag.
                 128,
                 7,
                 173,
