@@ -74,67 +74,67 @@ fn recv_io_requests(
         loop {
             let req_len = match reader.read_u64_le().await {
                 Ok(0) => {
-                    info!(target: "io-drivers:stdin", "encountered EOF");
+                    info!(target: "io-drivers:input", "encountered EOF");
                     return Status::Success;
                 }
                 Ok(req_len) => {
                     if let Ok(req_len) = usize::try_from(req_len) {
                         req_len
                     } else {
-                        error!(target: "io-drivers:stdin", "request length {} does not fit in usize", req_len);
+                        error!(target: "io-drivers:input", "request length {} does not fit in usize", req_len);
                         return Status::ReadFailed;
                     }
                 }
                 Err(err) => match err.kind() {
                     ErrorKind::UnexpectedEof => {
-                        info!(target: "io-drivers:stdin", "encountered EOF");
+                        info!(target: "io-drivers:input", "encountered EOF");
                         return Status::Success;
                     }
                     err => {
-                        error!(target: "io-drivers:stdin", "failed to read request length: {}", err);
+                        error!(target: "io-drivers:input", "failed to read request length: {}", err);
                         return Status::ReadFailed;
                     }
                 },
             };
-            debug!(target: "io-drivers:stdin", "request length = {}", req_len);
+            debug!(target: "io-drivers:input", "request length = {}", req_len);
 
             let req_tag = match reader.read_u8().await {
                 Ok(req_tag) => req_tag,
                 Err(err) => {
-                    error!(target: "io-drivers:stdin", "failed to read request tag: {}", err);
+                    error!(target: "io-drivers:input", "failed to read request tag: {}", err);
                     return Status::ReadFailed;
                 }
             };
-            debug!(target: "io-drivers:stdin", "request tag = {}", req_tag);
+            debug!(target: "io-drivers:input", "request tag = {}", req_tag);
 
             let req = {
                 let mut req = Vec::with_capacity(req_len);
                 req.resize(req.capacity(), 0);
                 if let Err(err) = reader.read_exact(&mut req).await {
-                    error!(target: "io-drivers:stdin", "failed to read jammed request of length {}: {}", req_len, err);
+                    error!(target: "io-drivers:input", "failed to read jammed request of length {}: {}", req_len, err);
                     return Status::ReadFailed;
                 }
                 Atom::from(req)
             };
-            debug!(target: "io-drivers:stdin", "request = {}", req);
+            debug!(target: "io-drivers:input", "request = {}", req);
 
             match Noun::cue(req) {
                 Ok(req) => match req_tag {
                     HTTP_CLIENT => {
                         if let Err(_req) = http_client_tx.send(req).await {
-                            error!(target: "io-drivers:stdin", "failed to send {} request of length {} to HTTP client driver", req_tag, req_len);
+                            error!(target: "io-drivers:input", "failed to send {} request of length {} to HTTP client driver", req_tag, req_len);
                             return Status::HttpClientFailed;
                         }
                     }
-                    _ => warn!(target: "io-drivers:stdin", "unknown request tag {}", req_tag),
+                    _ => warn!(target: "io-drivers:input", "unknown request tag {}", req_tag),
                 },
                 Err(err) => {
-                    warn!(target: "io-drivers:stdin", "failed to deserialize {} request of length {}: {:?}", req_tag, req_len, err)
+                    warn!(target: "io-drivers:input", "failed to deserialize {} request of length {}: {:?}", req_tag, req_len, err)
                 }
             }
         }
     });
-    debug!(target: "io-drivers:stdin", "spawned task");
+    debug!(target: "io-drivers:input", "spawned input task");
     task
 }
 
@@ -146,45 +146,45 @@ fn send_io_responses(
     let task = tokio::spawn(async move {
         let mut flush_retry_cnt = 0;
         const FLUSH_RETRY_MAX: usize = 5;
-        debug!(target: "io-drivers:stdout", "max flush retry attempts = {}", FLUSH_RETRY_MAX);
+        debug!(target: "io-drivers:output", "max flush retry attempts = {}", FLUSH_RETRY_MAX);
         while let Some(resp) = resp_rx.recv().await {
             let mut resp = resp.jam().into_vec();
             let resp_len = u64::try_from(resp.len());
             if let Err(err) = resp_len {
-                warn!(target: "io-drivers:stdout", "response length {} does not fit in u64: {}", resp.len(), err);
+                warn!(target: "io-drivers:output", "response length {} does not fit in u64: {}", resp.len(), err);
                 continue;
             }
             let resp_len = resp_len.unwrap();
-            debug!(target: "io-drivers:stdout", "response length = {}", resp_len);
+            debug!(target: "io-drivers:output", "response length = {}", resp_len);
 
             if let Err(err) = writer.write_u64_le(resp_len).await {
-                error!(target: "io-drivers:stdout", "failed to write response length {}: {}", resp_len, err);
+                error!(target: "io-drivers:output", "failed to write response length {}: {}", resp_len, err);
                 return Status::WriteFailed;
             }
 
             if let Err(err) = writer.write_all(&mut resp).await {
-                error!(target: "io-drivers:stdout", "failed to write jammed response {}: {}", Atom::from(resp), err);
+                error!(target: "io-drivers:output", "failed to write jammed response {}: {}", Atom::from(resp), err);
                 return Status::WriteFailed;
             }
-            debug!(target: "io-drivers:stdout", "response = {}", Atom::from(resp));
+            debug!(target: "io-drivers:output", "response = {}", Atom::from(resp));
 
             if let Err(err) = writer.flush().await {
-                warn!(target: "io-drivers:stdout", "failed to flush stdout: {}", err);
+                warn!(target: "io-drivers:output", "failed to flush output: {}", err);
                 if flush_retry_cnt == FLUSH_RETRY_MAX {
-                    error!(target: "io-drivers:stdout", "failing after {} of {} flush retries attempted", flush_retry_cnt, FLUSH_RETRY_MAX);
+                    error!(target: "io-drivers:output", "failing after {} of {} flush retries attempted", flush_retry_cnt, FLUSH_RETRY_MAX);
                     return Status::WriteFailed;
                 } else {
                     flush_retry_cnt += 1;
-                    info!(target: "io-drivers:stdout", "{} of {} flush retries remaining", FLUSH_RETRY_MAX - flush_retry_cnt, FLUSH_RETRY_MAX);
+                    info!(target: "io-drivers:output", "{} of {} flush retries remaining", FLUSH_RETRY_MAX - flush_retry_cnt, FLUSH_RETRY_MAX);
                 }
             } else {
                 flush_retry_cnt = 0;
             }
-            debug!(target: "io-drivers:stdout", "flush retry count = {}", flush_retry_cnt);
+            debug!(target: "io-drivers:output", "flush retry count = {}", flush_retry_cnt);
         }
         Status::Success
     });
-    debug!(target: "io-drivers:stdout", "spawned task");
+    debug!(target: "io-drivers:output", "spawned output task");
     task
 }
 

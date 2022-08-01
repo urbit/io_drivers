@@ -188,7 +188,7 @@ impl HttpClient {
                         return;
                     }
                 };
-                debug!(target: "io-drivers:http:client", "response to request {} = {:?}", req_num, resp);
+                debug!(target: "io-drivers:http:client", "response to request #{} = {:?}", req_num, resp);
 
                 let (parts, body) = resp.into_parts();
 
@@ -199,7 +199,7 @@ impl HttpClient {
                         return;
                     }
                 };
-                debug!(target: "io-drivers:http:client", "response body to request {} = {:?}", req_num, body);
+                debug!(target: "io-drivers:http:client", "response body to request #{} = {:?}", req_num, body);
 
                 info!(target: "io-drivers:http:client", "received status {} in response to request #{}", parts.status.as_u16(), req_num);
 
@@ -234,9 +234,9 @@ impl HttpClient {
             if let Some(req_num) = req_num.as_u64() {
                 if let Some(task) = self.inflight_req.remove(&req_num) {
                     task.abort();
-                    info!(target: "io-drivers:http:client", "aborted task for request {}", req_num);
+                    info!(target: "io-drivers:http:client", "aborted task for request #{}", req_num);
                 } else {
-                    warn!(target: "io-drivers:http:client", "no task for request {} found in request cache", req_num);
+                    warn!(target: "io-drivers:http:client", "no task for request #{} found in request cache", req_num);
                 }
             } else {
                 warn!(target: "io-drivers:http:client", "request number does not fit in u64");
@@ -262,7 +262,7 @@ impl Driver for HttpClient {
 
         let hyper = Client::builder().build(https);
         let inflight_req = HashMap::new();
-        debug!(target: "io-drivers:http:client", "initialized driver");
+        debug!(target: "io-drivers:http:client", "initialized HTTP client driver");
         Self {
             hyper,
             inflight_req,
@@ -302,7 +302,7 @@ impl Driver for HttpClient {
             }
             Status::Success
         });
-        debug!(target: "io-drivers:http:client", "spawned task");
+        debug!(target: "io-drivers:http:client", "spawned HTTP client task");
         task
     }
 }
