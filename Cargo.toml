@@ -3,10 +3,6 @@ name = "io"
 version = "0.1.0"
 edition = "2021"
 
-[features]
-default = ["multi-thread"]
-multi-thread = ["tokio/rt-multi-thread"]
-
 [dependencies]
 env_logger = "0.9"
 hyper = { version = "0.14", features = ["client"] }
@@ -15,3 +11,10 @@ log = { version = "0.4" }
 noun = { git = "https://github.com/mcevoypeter/noun.git", features = ["thread-safe"] }
 rustls = { version = "0.20" }
 tokio = { version = "1", features = ["io-std", "io-util"] }
+
+[features]
+default = ["multi-thread"]
+multi-thread = ["tokio/rt-multi-thread"]
+
+[lib]
+crate-type = ["lib", "staticlib"]

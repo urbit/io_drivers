@@ -225,7 +225,8 @@ fn runtime() -> Runtime {
 ///
 /// The following drivers are currently supported:
 /// - HTTP client.
-pub fn run() -> Status {
+#[no_mangle]
+pub extern "C" fn run() -> Status {
     runtime().block_on(async {
         // TODO: decide if there's a better upper bound for number of unscheduled requests.
         const QUEUE_SIZE: usize = 32;
