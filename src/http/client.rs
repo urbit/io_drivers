@@ -2,6 +2,7 @@ use crate::{Driver, Status};
 use hyper::{
     body::{self, Bytes},
     client::{Client, HttpConnector},
+    header,
     http::response::Parts,
     Body, Request as HyperRequest,
 };
@@ -115,9 +116,9 @@ struct Response {
 }
 
 impl TryIntoNoun<Noun> for Response {
-    type Error = ();
+    type Error = header::ToStrError;
 
-    fn try_into_noun(self) -> Result<Noun, ()> {
+    fn try_into_noun(self) -> Result<Noun, header::ToStrError> {
         let req_num = Atom::from(self.req_num).into_rc_noun();
         let status = Atom::from(self.parts.status.as_u16()).into_rc_noun();
         let null = Atom::null().into_rc_noun();
@@ -129,10 +130,7 @@ impl TryIntoNoun<Noun> for Response {
                 let vals = headers.get_all(key);
                 let key = Atom::from(key).into_rc_noun();
                 for val in vals {
-                    let val = match val.to_str() {
-                        Ok(val) => Atom::from(val).into_rc_noun(),
-                        Err(_) => todo!("handle ToStrError"),
-                    };
+                    let val = Atom::from(val.to_str()?).into_rc_noun();
                     headers_cell =
                         Cell::from([Cell::from([key.clone(), val]).into_rc_noun(), headers_cell])
                             .into_rc_noun();
@@ -212,7 +210,7 @@ impl HttpClient {
                 {
                     Ok(resp) => resp,
                     Err(err) => {
-                        warn!(target: "io-drivers:http:client", "failed to convert response to request #{} into noun: {:?}", req_num, err);
+                        warn!(target: "io-drivers:http:client", "failed to convert response to request #{} into noun: {}", req_num, err);
                         return;
                     }
                 };
