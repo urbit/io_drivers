@@ -68,7 +68,7 @@ impl TryFrom<u8> for DriverTag {
     fn try_from(val: u8) -> Result<Self, ()> {
         match val {
             0 => Ok(Self::HttpClient),
-            _ => Err(())
+            _ => Err(()),
         }
     }
 }
@@ -318,7 +318,7 @@ mod tests {
                 0,
                 0,
                 0,
-                0,           // Length of (jam %hello).
+                0,                           // Length of (jam %hello).
                 DriverTag::HttpClient as u8, // Tag.
                 128,
                 7,
