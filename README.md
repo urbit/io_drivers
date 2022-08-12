@@ -1,6 +1,6 @@
-# urbit-io
+# Urbit IO drivers
 
-[![CI](https://github.com/urbit/io-drivers/actions/workflows/ci.yml/badge.svg)](https://github.com/urbit/io-drivers/actions/workflows/ci.yml)
+[![CI](https://github.com/mcevoypeter/io_drivers/actions/workflows/ci.yml/badge.svg)](https://github.com/mcevoypeter/io_drivers/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE.txt)
 
 ### Getting Started
