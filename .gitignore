@@ -1,3 +1,4 @@
-*.bak
 /Cargo.lock
+/bazel-*
 /target
+/user.bazelrc
