@@ -1,5 +1,5 @@
 use crate::{Driver, Status, QUEUE_SIZE};
-use log::debug;
+use log::{debug, warn};
 use noun::Noun;
 use tokio::{
     io::{self, Stdin, Stdout},
@@ -30,8 +30,23 @@ macro_rules! impl_driver {
                 _output_tx: Sender<Noun>,
             ) -> JoinHandle<Status> {
                 let task = tokio::spawn(async move {
-                    while let Some(_req) = input_rx.recv().await {
-                        todo!();
+                    while let Some(req) = input_rx.recv().await {
+                        if let Noun::Cell(req) = req {
+                            let (tag, req) = req.into_parts();
+                            if let Noun::Atom(tag) = &*tag {
+                                todo!()
+                            } else {
+                                warn!(
+                                    target: Self::name(),
+                                    "ignoring request because the tag is a cell"
+                                );
+                            }
+                        } else {
+                            warn!(
+                                target: Self::name(),
+                                "ignoring request because it's an atom"
+                            );
+                        }
                     }
                     Status::Success
                 });
