@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+env_logger = "0.9"
 hyper = { version = "0.14", features = ["client"] }
 hyper-rustls = { version = "0.23" }
 log = { version = "0.4", features = ["release_max_level_warn"] }
