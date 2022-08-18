@@ -1,25 +1,19 @@
 # Urbit IO drivers
 
-[![CI](https://github.com/mcevoypeter/io_drivers/actions/workflows/ci.yml/badge.svg)](https://github.com/mcevoypeter/io_drivers/actions/workflows/ci.yml)
+[![Cargo build](https://github.com/mcevoypeter/io_drivers/actions/workflows/cargo-build.yml/badge.svg)](https://github.com/mcevoypeter/io_drivers/actions/workflows/cargo-build.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE.txt)
 
 ### Getting Started
-
-##### Build
 
 To build, run:
 ```console
 $ cargo build
 ```
 
-##### Test
-
 To build and run the test suite, run:
 ```console
 $ cargo test
 ```
-
-##### Read
 
 To build and view the documentation, run:
 ```console
