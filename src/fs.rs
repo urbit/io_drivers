@@ -1,11 +1,36 @@
-use crate::{Driver, Status, QUEUE_SIZE};
+use crate::{mote, Driver, Status, QUEUE_SIZE};
 use log::{debug, warn};
-use noun::Noun;
+use noun::{atom::Atom, Noun};
 use tokio::{
     io::{self, Stdin, Stdout},
     sync::mpsc::{Receiver, Sender},
     task::JoinHandle,
 };
+
+/// Types of requests that can be handled by the filesystem driver.
+#[repr(u32)]
+enum Tag {
+    UpdateFilesystem = mote!('e', 'r', 'g', 'o'),
+    CommitMountPoint = mote!('d', 'i', 'r', 'k'),
+    DeleteMountPoint = mote!('o', 'g', 'r', 'e'),
+    ListMountPoints = mote!('h', 'i', 'l', 'l'),
+}
+
+impl PartialEq<Atom> for Tag {
+    fn eq(&self, other: &Atom) -> bool {
+        if let Some(other) = other.as_u32() {
+            self == &other
+        } else {
+            false
+        }
+    }
+}
+
+impl PartialEq<u32> for Tag {
+    fn eq(&self, other: &u32) -> bool {
+        self == other
+    }
+}
 
 /// The filesystem driver.
 pub struct Filesystem {}
