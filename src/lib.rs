@@ -20,6 +20,9 @@ use tokio::{
 
 type Channel<T> = (Sender<T>, Receiver<T>);
 
+/// Max number of items in a [`Channel`].
+const QUEUE_SIZE: usize = 32;
+
 /// The return status of a driver.
 #[derive(Eq, PartialEq)]
 #[repr(u8)]
