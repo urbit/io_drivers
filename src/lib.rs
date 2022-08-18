@@ -1,3 +1,4 @@
+pub mod fs;
 pub mod http;
 
 use log::{debug, error, info, warn};

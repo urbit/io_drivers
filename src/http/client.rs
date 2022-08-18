@@ -1,4 +1,4 @@
-use crate::{Driver, QUEUE_SIZE, Status};
+use crate::{Driver, Status, QUEUE_SIZE};
 use hyper::{
     body::{self, Bytes},
     client::{Client, HttpConnector},
@@ -285,7 +285,7 @@ impl HttpClient {
     }
 }
 
-/// Implements the [`Driver`] trait for the [`HttpClient`] struct.
+/// Implements the [`Driver`] trait for the [`HttpClient`] driver.
 macro_rules! impl_driver {
     ($input_src:ty, $output_sink:ty) => {
         impl Driver<$input_src, $output_sink> for HttpClient {
