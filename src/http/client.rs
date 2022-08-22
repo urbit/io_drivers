@@ -37,7 +37,7 @@ impl TryFromNoun<Rc<Noun>> for Request {
 
         if let Noun::Cell(req) = &*req {
             let [req_num, method, uri, headers, body] =
-                req.as_list::<5>().ok_or(convert::Error::MissingValue)?;
+                req.to_array::<5>().ok_or(convert::Error::MissingValue)?;
             if let (Noun::Atom(req_num), Noun::Atom(method), Noun::Atom(uri), mut headers, body) =
                 (&*req_num, &*method, &*uri, headers, body)
             {
@@ -67,7 +67,7 @@ impl TryFromNoun<Rc<Noun>> for Request {
                     Noun::Atom(_) => (0, Body::empty()),
                     Noun::Cell(body) => {
                         let [_null, body_len, body] =
-                            body.as_list::<3>().ok_or(convert::Error::MissingValue)?;
+                            body.to_array::<3>().ok_or(convert::Error::MissingValue)?;
 
                         if let (Noun::Atom(body_len), Noun::Atom(body)) = (&*body_len, &*body) {
                             let body_len = body_len.as_u64().ok_or(convert::Error::AtomToUint)?;
