@@ -63,7 +63,7 @@ impl Termination for Status {
 /// jammed_response length (8 bytes, little endian)
 /// jammed response        (>1 byte)
 /// ```
-trait Driver<I, O>
+pub trait Driver<I, O>
 where
     I: AsyncReadExt + Send + Unpin + 'static,
     O: AsyncWriteExt + Send + Unpin + 'static,
