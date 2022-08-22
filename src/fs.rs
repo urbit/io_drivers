@@ -16,8 +16,8 @@ enum Tag {
     ListMountPoints = mote!('h', 'i', 'l', 'l'),
 }
 
-impl PartialEq<Atom> for Tag {
-    fn eq(&self, other: &Atom) -> bool {
+impl PartialEq<&Atom> for Tag {
+    fn eq(&self, other: &&Atom) -> bool {
         if let Some(other) = other.as_u32() {
             self == &other
         } else {
@@ -35,7 +35,23 @@ impl PartialEq<u32> for Tag {
 /// The filesystem driver.
 pub struct Filesystem {}
 
-impl Filesystem {}
+impl Filesystem {
+    fn update_file_system(&self) {
+        todo!()
+    }
+
+    fn commit_mount_point(&self) {
+        todo!()
+    }
+
+    fn delete_mount_point(&self) {
+        todo!()
+    }
+
+    fn list_mount_points(&self) {
+        todo!()
+    }
+}
 
 /// Implements the [`Driver`] trait for the [`Filesystem`] driver.
 macro_rules! impl_driver {
@@ -59,7 +75,27 @@ macro_rules! impl_driver {
                         if let Noun::Cell(req) = req {
                             let (tag, req) = req.into_parts();
                             if let Noun::Atom(tag) = &*tag {
-                                todo!()
+                                if Tag::UpdateFilesystem == tag {
+                                    self.update_file_system();
+                                } else if Tag::CommitMountPoint == tag {
+                                    self.commit_mount_point();
+                                } else if Tag::DeleteMountPoint == tag {
+                                    self.delete_mount_point();
+                                } else if Tag::ListMountPoints == tag {
+                                    self.list_mount_points();
+                                } else {
+                                    if let Ok(tag) = tag.as_str() {
+                                        warn!(
+                                            target: Self::name(),
+                                            "ignoring request with unknown tag %{}", tag
+                                        );
+                                    } else {
+                                        warn!(
+                                            target: Self::name(),
+                                            "ignoring request with unknown tag %{}", tag
+                                        );
+                                    }
+                                }
                             } else {
                                 warn!(
                                     target: Self::name(),

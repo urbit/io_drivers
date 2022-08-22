@@ -337,7 +337,7 @@ macro_rules! impl_driver {
                                     } else {
                                         warn!(
                                             target: Self::name(),
-                                            "ignoring request with unknown tag",
+                                            "ignoring request with unknown tag %{}", tag
                                         );
                                     }
                                 }
