@@ -21,24 +21,15 @@ enum Request {
 impl TryFromNoun<Noun> for Request {
     fn try_from_noun(req: Noun) -> Result<Self, convert::Error> {
         if let Noun::Cell(req) = req {
-            if let Noun::Atom(tag) = &*req.head() {
+            let (tag, data) = req.into_parts();
+            if let Noun::Atom(tag) = &*tag {
                 // These tag names are terrible, but we unfortunatley can't do anything about
                 // it here because they're determined by the kernel.
                 match atom_as_str(tag)? {
                     // Update the file system.
-                    "ergo" => {
-                        if let Noun::Cell(data) = &*req.tail() {
-                            if let Noun::Atom(mount_point) = &*data.head() {
-                                Ok(Self::UpdateFileSystem(UpdateFileSystem {
-                                    mount_point: atom_as_str(mount_point)?.to_string(),
-                                }))
-                            } else {
-                                Err(convert::Error::UnexpectedCell)
-                            }
-                        } else {
-                            Err(convert::Error::UnexpectedAtom)
-                        }
-                    }
+                    "ergo" => Ok(Self::UpdateFileSystem(UpdateFileSystem::try_from_noun(
+                        &*data,
+                    )?)),
                     _ => todo!(),
                 }
             } else {
@@ -53,6 +44,22 @@ impl TryFromNoun<Noun> for Request {
 /// A request to update the file system.
 struct UpdateFileSystem {
     mount_point: String,
+}
+
+impl TryFromNoun<&Noun> for UpdateFileSystem {
+    fn try_from_noun(data: &Noun) -> Result<Self, convert::Error> {
+        if let Noun::Cell(data) = &*data {
+            if let Noun::Atom(mount_point) = &*data.head() {
+                Ok(Self {
+                    mount_point: atom_as_str(mount_point)?.to_string(),
+                })
+            } else {
+                Err(convert::Error::UnexpectedCell)
+            }
+        } else {
+            Err(convert::Error::UnexpectedAtom)
+        }
+    }
 }
 
 /// A request to commit a mount point.
