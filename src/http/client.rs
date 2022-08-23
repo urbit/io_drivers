@@ -29,15 +29,19 @@ enum Tag {
     CancelRequest,
 }
 
-impl TryFrom<&Atom> for Tag {
+impl TryFrom<&Noun> for Tag {
     type Error = ();
 
-    fn try_from(atom: &Atom) -> Result<Self, Self::Error> {
-        if let Ok(atom) = atom.as_str() {
-            match atom {
-                "request" => Ok(Self::SendRequest),
-                "cancel-request" => Ok(Self::CancelRequest),
-                _ => Err(()),
+    fn try_from(noun: &Noun) -> Result<Self, Self::Error> {
+        if let Noun::Atom(atom) = noun {
+            if let Ok(atom) = atom.as_str() {
+                match atom {
+                    "request" => Ok(Self::SendRequest),
+                    "cancel-request" => Ok(Self::CancelRequest),
+                    _ => Err(()),
+                }
+            } else {
+                Err(())
             }
         } else {
             Err(())
@@ -346,31 +350,15 @@ macro_rules! impl_driver {
                     while let Some(req) = input_rx.recv().await {
                         if let Noun::Cell(req) = req {
                             let (tag, req) = req.into_parts();
-                            if let Noun::Atom(tag) = &*tag {
-                                match Tag::try_from(tag) {
-                                    Ok(Tag::SendRequest) => {
-                                        self.send_request(req, output_tx.clone())
-                                    }
-                                    Ok(Tag::CancelRequest) => self.cancel_request(req),
-                                    _ => {
-                                        if let Ok(tag) = tag.as_str() {
-                                            warn!(
-                                                target: Self::name(),
-                                                "ignoring request with unknown tag %{}", tag
-                                            );
-                                        } else {
-                                            warn!(
-                                                target: Self::name(),
-                                                "ignoring request with unknown tag %{}", tag
-                                            );
-                                        }
-                                    }
+                            match Tag::try_from(&*tag) {
+                                Ok(Tag::SendRequest) => self.send_request(req, output_tx.clone()),
+                                Ok(Tag::CancelRequest) => self.cancel_request(req),
+                                _ => {
+                                    warn!(
+                                        target: Self::name(),
+                                        "ignoring request with unknown tag %{}", tag
+                                    );
                                 }
-                            } else {
-                                warn!(
-                                    target: Self::name(),
-                                    "ignoring request because the tag is a cell",
-                                );
                             }
                         } else {
                             warn!(
