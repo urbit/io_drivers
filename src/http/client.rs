@@ -22,6 +22,29 @@ use tokio::{
     task::JoinHandle,
 };
 
+/// Types of requests that can be handled by the HTTP client driver.
+#[repr(u32)]
+enum Tag {
+    SendRequest,
+    CancelRequest,
+}
+
+impl TryFrom<&Atom> for Tag {
+    type Error = ();
+
+    fn try_from(atom: &Atom) -> Result<Self, Self::Error> {
+        if let Ok(atom) = atom.as_str() {
+            match atom {
+                "request" => Ok(Self::SendRequest),
+                "cancel-request" => Ok(Self::CancelRequest),
+                _ => Err(()),
+            }
+        } else {
+            Err(())
+        }
+    }
+}
+
 /// An HTTP request.
 #[derive(Debug)]
 struct Request {
@@ -324,21 +347,23 @@ macro_rules! impl_driver {
                         if let Noun::Cell(req) = req {
                             let (tag, req) = req.into_parts();
                             if let Noun::Atom(tag) = &*tag {
-                                if tag == "request" {
-                                    self.send_request(req, output_tx.clone());
-                                } else if tag == "cancel-request" {
-                                    self.cancel_request(req);
-                                } else {
-                                    if let Ok(tag) = tag.as_str() {
-                                        warn!(
-                                            target: Self::name(),
-                                            "ignoring request with unknown tag %{}", tag
-                                        );
-                                    } else {
-                                        warn!(
-                                            target: Self::name(),
-                                            "ignoring request with unknown tag %{}", tag
-                                        );
+                                match Tag::try_from(tag) {
+                                    Ok(Tag::SendRequest) => {
+                                        self.send_request(req, output_tx.clone())
+                                    }
+                                    Ok(Tag::CancelRequest) => self.cancel_request(req),
+                                    _ => {
+                                        if let Ok(tag) = tag.as_str() {
+                                            warn!(
+                                                target: Self::name(),
+                                                "ignoring request with unknown tag %{}", tag
+                                            );
+                                        } else {
+                                            warn!(
+                                                target: Self::name(),
+                                                "ignoring request with unknown tag %{}", tag
+                                            );
+                                        }
                                     }
                                 }
                             } else {
