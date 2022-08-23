@@ -10,7 +10,7 @@ use tokio::{
 /// Types of requests that can be handled by the filesystem driver.
 #[repr(u32)]
 enum Tag {
-    UpdateFilesystem = mote!('e', 'r', 'g', 'o'),
+    UpdateFileSystem = mote!('e', 'r', 'g', 'o'),
     CommitMountPoint = mote!('d', 'i', 'r', 'k'),
     DeleteMountPoint = mote!('o', 'g', 'r', 'e'),
     ListMountPoints = mote!('h', 'i', 'l', 'l'),
@@ -33,9 +33,9 @@ impl PartialEq<u32> for Tag {
 }
 
 /// The filesystem driver.
-pub struct Filesystem {}
+pub struct FileSystem {}
 
-impl Filesystem {
+impl FileSystem {
     fn update_file_system(&self) {
         todo!()
     }
@@ -53,10 +53,10 @@ impl Filesystem {
     }
 }
 
-/// Implements the [`Driver`] trait for the [`Filesystem`] driver.
+/// Implements the [`Driver`] trait for the [`FileSystem`] driver.
 macro_rules! impl_driver {
     ($input_src:ty, $output_sink:ty) => {
-        impl Driver<$input_src, $output_sink> for Filesystem {
+        impl Driver<$input_src, $output_sink> for FileSystem {
             fn new() -> Result<Self, Status> {
                 Ok(Self {})
             }
@@ -75,7 +75,7 @@ macro_rules! impl_driver {
                         if let Noun::Cell(req) = req {
                             let (tag, req) = req.into_parts();
                             if let Noun::Atom(tag) = &*tag {
-                                if Tag::UpdateFilesystem == tag {
+                                if Tag::UpdateFileSystem == tag {
                                     self.update_file_system();
                                 } else if Tag::CommitMountPoint == tag {
                                     self.commit_mount_point();
@@ -124,7 +124,7 @@ impl_driver!(Stdin, Stdout);
 /// source and `stdout` as the output sink.
 #[no_mangle]
 pub extern "C" fn filesystem_run() -> Status {
-    match Filesystem::new() {
+    match FileSystem::new() {
         Ok(driver) => driver.run::<QUEUE_SIZE>(io::stdin(), io::stdout()),
         Err(status) => status,
     }
