@@ -12,7 +12,7 @@ use noun::{
     atom::Atom,
     cell::Cell,
     convert::{self, IntoNoun, TryFromNoun, TryIntoNoun},
-    Noun, Rc,
+    Noun,
 };
 use rustls::ClientConfig;
 use std::collections::HashMap;
@@ -22,43 +22,45 @@ use tokio::{
     task::JoinHandle,
 };
 
-/// Types of requests that can be handled by the HTTP client driver.
-#[repr(u32)]
-enum Tag {
-    SendRequest,
-    CancelRequest,
+/// Requests that can be handled by the HTTP client driver.
+enum Request {
+    SendRequest(SendRequest),
+    CancelRequest(CancelRequest),
 }
 
-impl TryFromNoun<&Noun> for Tag {
-    fn try_from_noun(noun: &Noun) -> Result<Self, convert::Error> {
-        if let Noun::Atom(atom) = noun {
-            if let Ok(atom) = atom.as_str() {
-                match atom {
-                    "request" => Ok(Self::SendRequest),
-                    "cancel-request" => Ok(Self::CancelRequest),
+impl TryFromNoun<Noun> for Request {
+    fn try_from_noun(req: Noun) -> Result<Self, convert::Error> {
+        if let Noun::Cell(req) = req {
+            let (tag, data) = req.into_parts();
+            if let Noun::Atom(tag) = &*tag {
+                match atom_as_str(tag)? {
+                    "request" => Ok(Self::SendRequest(SendRequest::try_from_noun(&*data)?)),
+                    "cancel-request" => {
+                        Ok(Self::CancelRequest(CancelRequest::try_from_noun(&*data)?))
+                    }
                     _ => Err(convert::Error::ImplType),
                 }
             } else {
-                Err(convert::Error::AtomToStr)
+                Err(convert::Error::UnexpectedCell)
             }
         } else {
-            Err(convert::Error::UnexpectedCell)
+            Err(convert::Error::UnexpectedAtom)
         }
     }
 }
 
-/// An HTTP request.
+/// A request to send an HTTP request.
 #[derive(Debug)]
-struct Request {
+struct SendRequest {
     req_num: u64,
     req: HyperRequest<Body>,
 }
 
-impl TryFromNoun<Rc<Noun>> for Request {
-    fn try_from_noun(req: Rc<Noun>) -> Result<Self, convert::Error> {
-        if let Noun::Cell(req) = &*req {
+impl TryFromNoun<&Noun> for SendRequest {
+    fn try_from_noun(data: &Noun) -> Result<Self, convert::Error> {
+        if let Noun::Cell(data) = data {
             let [req_num, method, uri, headers, body] =
-                req.to_array::<5>().ok_or(convert::Error::MissingValue)?;
+                data.to_array::<5>().ok_or(convert::Error::MissingValue)?;
             if let (Noun::Atom(req_num), Noun::Atom(method), Noun::Atom(uri), mut headers, body) =
                 (&*req_num, &*method, &*uri, headers, body)
             {
@@ -130,17 +132,36 @@ impl TryFromNoun<Rc<Noun>> for Request {
     }
 }
 
-/// An HTTP response.
-struct Response {
+/// A request to cancel an inflight HTTP request.
+#[derive(Debug)]
+struct CancelRequest {
+    req_num: u64,
+}
+
+impl TryFromNoun<&Noun> for CancelRequest {
+    fn try_from_noun(data: &Noun) -> Result<Self, convert::Error> {
+        if let Noun::Atom(req_num) = data {
+            Ok(Self {
+                req_num: req_num.as_u64().ok_or(convert::Error::AtomToUint)?,
+            })
+        } else {
+            Err(convert::Error::UnexpectedCell)
+        }
+    }
+}
+
+/// A response to an HTTP request.
+#[derive(Debug)]
+struct HyperResponse {
     req_num: u64,
     parts: Parts,
     body: Bytes,
 }
 
-impl TryIntoNoun<Noun> for Response {
+impl TryIntoNoun<Noun> for HyperResponse {
     type Error = header::ToStrError;
 
-    fn try_into_noun(self) -> Result<Noun, header::ToStrError> {
+    fn try_into_noun(self) -> Result<Noun, Self::Error> {
         let req_num = Atom::from(self.req_num).into_rc_noun();
         let status = Atom::from(self.parts.status.as_u16()).into_rc_noun();
         let null = Atom::null().into_rc_noun();
@@ -185,18 +206,7 @@ pub struct HttpClient {
 
 impl HttpClient {
     /// Sends an HTTP request, writing the reponse to the output channel.
-    fn send_request(&mut self, req: Rc<Noun>, output_tx: Sender<Noun>) {
-        let req = {
-            let req = Request::try_from_noun(req);
-            if let Err(err) = req {
-                warn!(
-                    target: Self::name(),
-                    "failed to convert request noun into hyper request: {}", err
-                );
-                return;
-            }
-            req.unwrap()
-        };
+    fn send_request(&mut self, req: SendRequest, output_tx: Sender<Noun>) {
         debug!(target: Self::name(), "request = {:?}", req);
 
         let req_num = req.req_num;
@@ -243,7 +253,7 @@ impl HttpClient {
                     req_num
                 );
 
-                let resp = match (Response {
+                let resp = match (HyperResponse {
                     req_num: req.req_num,
                     parts,
                     body,
@@ -279,28 +289,17 @@ impl HttpClient {
     }
 
     /// Cancels an inflight HTTP request.
-    fn cancel_request(&mut self, req: Rc<Noun>) {
-        if let Noun::Atom(req_num) = &*req {
-            if let Some(req_num) = req_num.as_u64() {
-                if let Some(task) = self.inflight_req.remove(&req_num) {
-                    task.abort();
-                    info!(
-                        target: Self::name(),
-                        "aborted task for request #{}", req_num
-                    );
-                } else {
-                    warn!(
-                        target: Self::name(),
-                        "no task for request #{} found in request cache", req_num
-                    );
-                }
-            } else {
-                warn!(target: Self::name(), "request number does not fit in u64");
-            }
+    fn cancel_request(&mut self, req: CancelRequest) {
+        if let Some(task) = self.inflight_req.remove(&req.req_num) {
+            task.abort();
+            info!(
+                target: Self::name(),
+                "aborted task for request #{}", req.req_num
+            );
         } else {
             warn!(
                 target: Self::name(),
-                "ignoring request to cancel existing request because the request number is a cell"
+                "no task for request #{} found in request cache", req.req_num
             );
         }
     }
@@ -342,23 +341,12 @@ macro_rules! impl_driver {
             ) -> JoinHandle<Status> {
                 let task = tokio::spawn(async move {
                     while let Some(req) = input_rx.recv().await {
-                        if let Noun::Cell(req) = req {
-                            let (tag, req) = req.into_parts();
-                            match Tag::try_from_noun(&*tag) {
-                                Ok(Tag::SendRequest) => self.send_request(req, output_tx.clone()),
-                                Ok(Tag::CancelRequest) => self.cancel_request(req),
-                                _ => {
-                                    warn!(
-                                        target: Self::name(),
-                                        "ignoring request with unknown tag %{}", tag
-                                    );
-                                }
+                        match Request::try_from_noun(req) {
+                            Ok(Request::SendRequest(req)) => {
+                                self.send_request(req, output_tx.clone())
                             }
-                        } else {
-                            warn!(
-                                target: Self::name(),
-                                "ignoring request because it's an atom"
-                            );
+                            Ok(Request::CancelRequest(req)) => self.cancel_request(req),
+                            _ => todo!(),
                         }
                     }
                     for (req_num, task) in self.inflight_req {
@@ -438,7 +426,7 @@ mod tests {
             let body =
                 Bytes::from(r#"[{"jsonrpc":"2.0","id":"block number","result":"0xe67461"}]"#);
 
-            let resp = Response {
+            let resp = HyperResponse {
                 req_num,
                 parts,
                 body,
