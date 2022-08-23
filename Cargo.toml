@@ -16,5 +16,6 @@ rustls = { version = "0.20", optional = true }
 tokio = { version = "1", features = ["io-std", "io-util", "rt-multi-thread"] }
 
 [features]
-default = ["http-client"]
+default = ["filesystem", "http-client"]
+filesystem = []
 http-client = ["hyper", "hyper-rustls", "rustls"]
