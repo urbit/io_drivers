@@ -1,4 +1,4 @@
-use crate::{Driver, Status, QUEUE_SIZE};
+use crate::{atom_as_str, Driver, Status, QUEUE_SIZE};
 use hyper::{
     body::{self, Bytes},
     client::{Client, HttpConnector},
@@ -56,10 +56,6 @@ struct Request {
 
 impl TryFromNoun<Rc<Noun>> for Request {
     fn try_from_noun(req: Rc<Noun>) -> Result<Self, convert::Error> {
-        fn atom_as_str(atom: &Atom) -> Result<&str, convert::Error> {
-            atom.as_str().map_err(|_| convert::Error::AtomToStr)
-        }
-
         if let Noun::Cell(req) = &*req {
             let [req_num, method, uri, headers, body] =
                 req.to_array::<5>().ok_or(convert::Error::MissingValue)?;

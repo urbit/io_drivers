@@ -6,6 +6,7 @@ pub mod http;
 use log::{debug, error, info, warn};
 use noun::{
     atom::Atom,
+    convert,
     serdes::{Cue, Jam},
     Noun,
 };
@@ -274,4 +275,11 @@ where
         debug!(target: Self::name(), "spawned output task");
         task
     }
+}
+
+/// Converts an atom into a string, returning a `convert::Error` if the operation failed.
+///
+/// This function exists purely for convenience.
+fn atom_as_str(atom: &Atom) -> Result<&str, convert::Error> {
+    atom.as_str().map_err(|_| convert::Error::AtomToStr)
 }
