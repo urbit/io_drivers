@@ -16,19 +16,25 @@ enum Tag {
     ListMountPoints = mote!('h', 'i', 'l', 'l'),
 }
 
-impl PartialEq<&Atom> for Tag {
-    fn eq(&self, other: &&Atom) -> bool {
-        if let Some(other) = other.as_u32() {
-            self == &other
-        } else {
-            false
-        }
-    }
-}
+impl TryFrom<&Atom> for Tag {
+    type Error = ();
 
-impl PartialEq<u32> for Tag {
-    fn eq(&self, other: &u32) -> bool {
-        self == other
+    fn try_from(atom: &Atom) -> Result<Self, Self::Error> {
+        if let Some(atom) = atom.as_u32() {
+            if atom == Self::UpdateFileSystem as u32 {
+                Ok(Self::UpdateFileSystem)
+            } else if atom == Self::CommitMountPoint as u32 {
+                Ok(Self::CommitMountPoint)
+            } else if atom == Self::DeleteMountPoint as u32 {
+                Ok(Self::DeleteMountPoint)
+            } else if atom == Self::ListMountPoints as u32 {
+                Ok(Self::ListMountPoints)
+            } else {
+                Err(())
+            }
+        } else {
+            Err(())
+        }
     }
 }
 
@@ -75,25 +81,23 @@ macro_rules! impl_driver {
                         if let Noun::Cell(req) = req {
                             let (tag, req) = req.into_parts();
                             if let Noun::Atom(tag) = &*tag {
-                                if Tag::UpdateFileSystem == tag {
-                                    self.update_file_system();
-                                } else if Tag::CommitMountPoint == tag {
-                                    self.commit_mount_point();
-                                } else if Tag::DeleteMountPoint == tag {
-                                    self.delete_mount_point();
-                                } else if Tag::ListMountPoints == tag {
-                                    self.list_mount_points();
-                                } else {
-                                    if let Ok(tag) = tag.as_str() {
-                                        warn!(
-                                            target: Self::name(),
-                                            "ignoring request with unknown tag %{}", tag
-                                        );
-                                    } else {
-                                        warn!(
-                                            target: Self::name(),
-                                            "ignoring request with unknown tag %{}", tag
-                                        );
+                                match Tag::try_from(tag) {
+                                    Ok(Tag::UpdateFileSystem) => self.update_file_system(),
+                                    Ok(Tag::CommitMountPoint) => self.commit_mount_point(),
+                                    Ok(Tag::DeleteMountPoint) => self.delete_mount_point(),
+                                    Ok(Tag::ListMountPoints) => self.list_mount_points(),
+                                    _ => {
+                                        if let Ok(tag) = tag.as_str() {
+                                            warn!(
+                                                target: Self::name(),
+                                                "ignoring request with unknown tag %{}", tag
+                                            );
+                                        } else {
+                                            warn!(
+                                                target: Self::name(),
+                                                "ignoring request with unknown tag %{}", tag
+                                            );
+                                        }
                                     }
                                 }
                             } else {
