@@ -1,4 +1,4 @@
-#[cfg(feature = "filesystem")]
+#[cfg(feature = "file-system")]
 pub mod fs;
 #[cfg(feature = "http-client")]
 pub mod http;

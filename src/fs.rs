@@ -10,7 +10,7 @@ use tokio::{
     task::JoinHandle,
 };
 
-/// Requests that can be handled by the filesystem driver.
+/// Requests that can be handled by the file system driver.
 enum Request {
     UpdateFileSystem(UpdateFileSystem),
     CommitMountPoint(CommitMountPoint),
@@ -64,7 +64,7 @@ struct DeleteMountPoint {}
 /// A request to list the mount points.
 struct ListMountPoints {}
 
-/// The filesystem driver.
+/// The file system driver.
 pub struct FileSystem {}
 
 impl FileSystem {
@@ -94,7 +94,7 @@ macro_rules! impl_driver {
             }
 
             fn name() -> &'static str {
-                "filesystem"
+                "file-system"
             }
 
             fn handle_requests(
@@ -123,10 +123,10 @@ macro_rules! impl_driver {
 
 impl_driver!(Stdin, Stdout);
 
-/// Provides an FFI-friendly interface for running the filesystem driver with `stdin` as the input
+/// Provides an FFI-friendly interface for running the file system driver with `stdin` as the input
 /// source and `stdout` as the output sink.
 #[no_mangle]
-pub extern "C" fn filesystem_run() -> Status {
+pub extern "C" fn file_system_run() -> Status {
     match FileSystem::new() {
         Ok(driver) => driver.run::<QUEUE_SIZE>(io::stdin(), io::stdout()),
         Err(status) => status,
