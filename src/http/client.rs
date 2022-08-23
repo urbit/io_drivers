@@ -29,22 +29,20 @@ enum Tag {
     CancelRequest,
 }
 
-impl TryFrom<&Noun> for Tag {
-    type Error = ();
-
-    fn try_from(noun: &Noun) -> Result<Self, Self::Error> {
+impl TryFromNoun<&Noun> for Tag {
+    fn try_from_noun(noun: &Noun) -> Result<Self, convert::Error> {
         if let Noun::Atom(atom) = noun {
             if let Ok(atom) = atom.as_str() {
                 match atom {
                     "request" => Ok(Self::SendRequest),
                     "cancel-request" => Ok(Self::CancelRequest),
-                    _ => Err(()),
+                    _ => Err(convert::Error::ImplType),
                 }
             } else {
-                Err(())
+                Err(convert::Error::AtomToStr)
             }
         } else {
-            Err(())
+            Err(convert::Error::UnexpectedCell)
         }
     }
 }
@@ -350,7 +348,7 @@ macro_rules! impl_driver {
                     while let Some(req) = input_rx.recv().await {
                         if let Noun::Cell(req) = req {
                             let (tag, req) = req.into_parts();
-                            match Tag::try_from(&*tag) {
+                            match Tag::try_from_noun(&*tag) {
                                 Ok(Tag::SendRequest) => self.send_request(req, output_tx.clone()),
                                 Ok(Tag::CancelRequest) => self.cancel_request(req),
                                 _ => {

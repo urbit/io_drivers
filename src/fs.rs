@@ -1,6 +1,9 @@
 use crate::{Driver, Status, QUEUE_SIZE};
 use log::{debug, warn};
-use noun::Noun;
+use noun::{
+    convert::{self, TryFromNoun},
+    Noun,
+};
 use tokio::{
     io::{self, Stdin, Stdout},
     sync::mpsc::{Receiver, Sender},
@@ -16,10 +19,8 @@ enum Tag {
     ListMountPoints,
 }
 
-impl TryFrom<&Noun> for Tag {
-    type Error = ();
-
-    fn try_from(noun: &Noun) -> Result<Self, Self::Error> {
+impl TryFromNoun<&Noun> for Tag {
+    fn try_from_noun(noun: &Noun) -> Result<Self, convert::Error> {
         if let Noun::Atom(atom) = noun {
             if let Ok(atom) = atom.as_str() {
                 // These tag names are terrible, but we unfortunately can't do anything about it
@@ -29,13 +30,13 @@ impl TryFrom<&Noun> for Tag {
                     "dirk" => Ok(Self::CommitMountPoint),
                     "ogre" => Ok(Self::DeleteMountPoint),
                     "hill" => Ok(Self::ListMountPoints),
-                    _ => Err(()),
+                    _ => Err(convert::Error::ImplType),
                 }
             } else {
-                Err(())
+                Err(convert::Error::AtomToStr)
             }
         } else {
-            Err(())
+            Err(convert::Error::UnexpectedCell)
         }
     }
 }
@@ -82,7 +83,7 @@ macro_rules! impl_driver {
                     while let Some(req) = input_rx.recv().await {
                         if let Noun::Cell(req) = req {
                             let (tag, req) = req.into_parts();
-                            match Tag::try_from(&*tag) {
+                            match Tag::try_from_noun(&*tag) {
                                 Ok(Tag::UpdateFileSystem) => self.update_file_system(),
                                 Ok(Tag::CommitMountPoint) => self.commit_mount_point(),
                                 Ok(Tag::DeleteMountPoint) => self.delete_mount_point(),
