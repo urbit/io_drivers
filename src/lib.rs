@@ -1,4 +1,5 @@
 pub mod fs;
+#[cfg(feature = "http-client")]
 pub mod http;
 
 use log::{debug, error, info, warn};
