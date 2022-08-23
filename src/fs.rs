@@ -1,4 +1,4 @@
-use crate::{mote, Driver, Status, QUEUE_SIZE};
+use crate::{Driver, Status, QUEUE_SIZE};
 use log::{debug, warn};
 use noun::Noun;
 use tokio::{
@@ -10,10 +10,10 @@ use tokio::{
 /// Types of requests that can be handled by the filesystem driver.
 #[repr(u32)]
 enum Tag {
-    UpdateFileSystem = mote!('e', 'r', 'g', 'o'),
-    CommitMountPoint = mote!('d', 'i', 'r', 'k'),
-    DeleteMountPoint = mote!('o', 'g', 'r', 'e'),
-    ListMountPoints = mote!('h', 'i', 'l', 'l'),
+    UpdateFileSystem,
+    CommitMountPoint,
+    DeleteMountPoint,
+    ListMountPoints,
 }
 
 impl TryFrom<&Noun> for Tag {
@@ -21,17 +21,15 @@ impl TryFrom<&Noun> for Tag {
 
     fn try_from(noun: &Noun) -> Result<Self, Self::Error> {
         if let Noun::Atom(atom) = noun {
-            if let Some(atom) = atom.as_u32() {
-                if atom == Self::UpdateFileSystem as u32 {
-                    Ok(Self::UpdateFileSystem)
-                } else if atom == Self::CommitMountPoint as u32 {
-                    Ok(Self::CommitMountPoint)
-                } else if atom == Self::DeleteMountPoint as u32 {
-                    Ok(Self::DeleteMountPoint)
-                } else if atom == Self::ListMountPoints as u32 {
-                    Ok(Self::ListMountPoints)
-                } else {
-                    Err(())
+            if let Ok(atom) = atom.as_str() {
+                // These tag names are terrible, but we unfortunately can't do anything about it
+                // here because they're determined by the kernel.
+                match atom {
+                    "ergo" => Ok(Self::UpdateFileSystem),
+                    "dirk" => Ok(Self::CommitMountPoint),
+                    "ogre" => Ok(Self::DeleteMountPoint),
+                    "hill" => Ok(Self::ListMountPoints),
+                    _ => Err(()),
                 }
             } else {
                 Err(())
