@@ -185,6 +185,7 @@ impl AsRef<path::Path> for PathComponent {
     }
 }
 
+/// Attempts to create a [`PathComponent`] from an [`Knot`].
 impl TryFromNoun<Knot<&Atom>> for PathComponent {
     fn try_from_noun(knot: Knot<&Atom>) -> Result<Self, convert::Error> {
         let knot = atom_as_str(knot.0)?;
@@ -204,6 +205,7 @@ impl TryFromNoun<Knot<&Atom>> for PathComponent {
     }
 }
 
+/// Attempts to create a [`Knot`] from a [`PathComponent`].
 impl TryIntoNoun<Knot<Atom>> for PathComponent {
     type Error = ();
 
@@ -228,6 +230,7 @@ impl TryIntoNoun<Knot<Atom>> for PathComponent {
 /// A file system path.
 struct Path(PathBuf);
 
+/// Attempts to create a [`Path`] from a [`KnotList`].
 impl TryFromNoun<KnotList<&Cell>> for Path {
     fn try_from_noun(knot_list: KnotList<&Cell>) -> Result<Self, convert::Error> {
         let mut path = PathBuf::new();
@@ -244,6 +247,7 @@ impl TryFromNoun<KnotList<&Cell>> for Path {
     }
 }
 
+/// Attempts to create a [`KnotList`] from a [`Path`].
 impl TryIntoNoun<KnotList<Cell>> for Path {
     type Error = ();
 
