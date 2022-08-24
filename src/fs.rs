@@ -2,11 +2,12 @@ use crate::{atom_as_str, Driver, Status};
 use log::debug;
 use noun::{
     atom::Atom,
+    cell::Cell,
     convert::{self, TryFromNoun, TryIntoNoun},
-    marker::{Atomish, Nounish},
+    marker::{Atomish, Cellish, Nounish},
     Noun,
 };
-use std::path;
+use std::path::{self, PathBuf};
 use tokio::{
     io::{self, Stdin, Stdout},
     sync::mpsc::{Receiver, Sender},
@@ -167,8 +168,22 @@ impl Nounish for Knot<&Atom> {}
 
 impl Nounish for Knot<Atom> {}
 
+/// A list of `$knot`.
+struct KnotList<C: Cellish>(C);
+
+impl Nounish for KnotList<&Cell> {}
+
+impl Nounish for KnotList<Cell> {}
+
 /// A component of a file system path.
 struct PathComponent(String);
+
+/// Enables a [`PathComponent`] to be pushed onto a [`std::path::Path`] or [`std::path::PathBuf`].
+impl AsRef<path::Path> for PathComponent {
+    fn as_ref(&self) -> &path::Path {
+        self.0.as_ref()
+    }
+}
 
 impl TryFromNoun<Knot<&Atom>> for PathComponent {
     fn try_from_noun(knot: Knot<&Atom>) -> Result<Self, convert::Error> {
@@ -210,6 +225,39 @@ impl TryIntoNoun<Knot<Atom>> for PathComponent {
     }
 }
 
+/// A file system path.
+struct Path(PathBuf);
+
+impl TryFromNoun<KnotList<&Cell>> for Path {
+    fn try_from_noun(knot_list: KnotList<&Cell>) -> Result<Self, convert::Error> {
+        let mut path = PathBuf::new();
+        for knot in knot_list.0.to_vec() {
+            if let Noun::Atom(knot) = &*knot {
+                let path_component = PathComponent::try_from_noun(Knot(knot))?;
+                path.push(path_component);
+            } else {
+                return Err(convert::Error::UnexpectedCell);
+            }
+        }
+        Ok(Self(path))
+    }
+}
+
+impl TryIntoNoun<KnotList<Cell>> for Path {
+    type Error = ();
+
+    fn try_into_noun(self) -> Result<KnotList<Cell>, Self::Error> {
+        let mut path_components = Vec::new();
+        for path_component in self.0.components() {
+            let path_component =
+                PathComponent(path_component.as_os_str().to_str().ok_or(())?.to_string());
+            let knot = path_component.try_into_noun()?;
+            path_components.push(knot.0.into_rc_noun());
+        }
+        Ok(KnotList(Cell::from(path_components)))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,12 +265,14 @@ mod tests {
     #[test]
     fn try_from_knot() -> Result<(), convert::Error> {
         macro_rules! test {
+            // Expect success.
             (knot: $knot:literal, path_component: $path_component:literal) => {
                 let atom = Atom::from($knot);
                 let knot = Knot(&atom);
                 let path_component = PathComponent::try_from_noun(knot)?;
                 assert_eq!(path_component.0, $path_component);
             };
+            // Expect failure.
             (knot: $knot:expr) => {
                 let atom = Atom::from($knot);
                 let knot = Knot(&atom);
@@ -246,11 +296,13 @@ mod tests {
     #[test]
     fn try_into_knot() -> Result<(), ()> {
         macro_rules! test {
+            // Expect success.
             (path_component: $path_component:literal, knot: $knot:literal) => {
                 let path_component = PathComponent($path_component.to_string());
                 let knot = path_component.try_into_noun()?;
                 assert_eq!(knot.0, $knot);
             };
+            // Expect failure.
             (path_component: $path_component:expr) => {
                 let path_component = PathComponent($path_component.to_string());
                 assert!(path_component.try_into_noun().is_err());
@@ -278,6 +330,63 @@ mod tests {
                     )
             );
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn try_from_knot_list() -> Result<(), convert::Error> {
+        macro_rules! test {
+            // Expect success.
+            (knot_list: $knot_list:expr, path: $path:literal) => {
+                let cell = Cell::from($knot_list);
+                let knot_list = KnotList(&cell);
+                let path = Path::try_from_noun(knot_list)?;
+                assert_eq!(path.0, path::Path::new($path));
+            };
+            // Expect failure.
+            (knot_list: $knot_list:expr) => {
+                let cell = Cell::from($knot_list);
+                let knot_list = KnotList(&cell);
+                assert!(Path::try_from_noun(knot_list).is_err());
+            };
+        }
+
+        test!(knot_list: ["hello", "goodbye"], path: "hello/goodbye");
+        test!(knot_list: ["some", ".", "path"], path: "some/!./path");
+        test!(knot_list: ["..", "!", "", "jian3", "fei2"], path: "!../!!/!/jian3/fei2");
+        test!(knot_list: [&format!("{}uh-oh", path::MAIN_SEPARATOR), "gan4ma2"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn try_into_knot_list() -> Result<(), ()> {
+        macro_rules! test {
+            // Expect success.
+            (path: $path:literal, knot_list: $knot_list:expr) => {
+                let path = Path(PathBuf::from($path));
+                let knot_list = path.try_into_noun()?;
+                assert_eq!(knot_list.0, Cell::from($knot_list))
+            };
+            // Expect failure.
+            (path: $path:expr) => {
+                let path = Path(PathBuf::from($path));
+                assert!(path.try_into_noun().is_err());
+            };
+        }
+
+        test!(path: "la/dee/da", knot_list: ["la", "dee", "da"]);
+        test!(path: "some/!!escaped/path", knot_list: ["some", "!escaped", "path"]);
+        test!(path: "!./!../!/more/components", knot_list: [".", "..", "", "more", "components"]);
+        test!(
+            path: format!(
+                "{}the{}usual{}",
+                path::MAIN_SEPARATOR,
+                path::MAIN_SEPARATOR,
+                path::MAIN_SEPARATOR
+            )
+        );
 
         Ok(())
     }
