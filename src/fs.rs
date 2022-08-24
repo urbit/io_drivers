@@ -7,7 +7,10 @@ use noun::{
     marker::{Atomish, Cellish, Nounish},
     Noun,
 };
-use std::path::{self, PathBuf};
+use std::{
+    collections::HashMap,
+    path::{self, PathBuf},
+};
 use tokio::{
     io::{self, Stdin, Stdout},
     sync::mpsc::{Receiver, Sender},
@@ -80,7 +83,7 @@ struct DeleteMountPoint {}
 
 /// A request to list the mount points.
 struct ListMountPoints {
-    /// The mount points to list.
+    /// The names of the mount points to list.
     mount_points: Vec<String>,
 }
 
@@ -107,8 +110,9 @@ impl TryFromNoun<&Noun> for ListMountPoints {
 //==================================================================================================
 
 /// The file system driver.
-// Seems like the driver needs to maintain a list of mount points.
-pub struct FileSystem {}
+pub struct FileSystem {
+    mount_points: HashMap<String, MountPoint>,
+}
 
 impl FileSystem {
     fn update_file_system(&self, _req: UpdateFileSystem) {
@@ -133,7 +137,9 @@ macro_rules! impl_driver {
     ($input_src:ty, $output_sink:ty) => {
         impl Driver<$input_src, $output_sink> for FileSystem {
             fn new() -> Result<Self, Status> {
-                Ok(Self {})
+                Ok(Self {
+                    mount_points: HashMap::new(),
+                })
             }
 
             fn name() -> &'static str {
@@ -284,6 +290,9 @@ impl TryIntoNoun<KnotList<Cell>> for Path {
         Ok(KnotList(Cell::from(path_components)))
     }
 }
+
+/// A file system mount point.
+struct MountPoint {}
 
 #[cfg(test)]
 mod tests {
