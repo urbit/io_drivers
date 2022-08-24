@@ -79,7 +79,28 @@ struct CommitMountPoint {}
 struct DeleteMountPoint {}
 
 /// A request to list the mount points.
-struct ListMountPoints {}
+struct ListMountPoints {
+    /// The mount points to list.
+    mount_points: Vec<String>,
+}
+
+impl TryFromNoun<&Noun> for ListMountPoints {
+    fn try_from_noun(data: &Noun) -> Result<Self, convert::Error> {
+        if let Noun::Cell(data) = &*data {
+            let mut mount_points = Vec::new();
+            for mount_point in data.to_vec() {
+                if let Noun::Atom(mount_point) = &*mount_point {
+                    mount_points.push(atom_as_str(mount_point)?.to_string());
+                } else {
+                    return Err(convert::Error::UnexpectedCell);
+                }
+            }
+            Ok(Self { mount_points })
+        } else {
+            Err(convert::Error::UnexpectedAtom)
+        }
+    }
+}
 
 //==================================================================================================
 // Driver
