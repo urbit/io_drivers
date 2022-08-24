@@ -10,6 +10,10 @@ use tokio::{
     task::JoinHandle,
 };
 
+//==================================================================================================
+// Request types
+//==================================================================================================
+
 /// Requests that can be handled by the file system driver.
 enum Request {
     UpdateFileSystem(UpdateFileSystem),
@@ -50,6 +54,8 @@ impl TryFromNoun<&Noun> for UpdateFileSystem {
     fn try_from_noun(data: &Noun) -> Result<Self, convert::Error> {
         if let Noun::Cell(data) = &*data {
             if let Noun::Atom(mount_point) = &*data.head() {
+                // data.tail() is `can`, which is a null-terminated list of pairs
+                // each pair appears to [<path within mount point> <file type>]
                 Ok(Self {
                     mount_point: atom_as_str(mount_point)?.to_string(),
                 })
@@ -71,7 +77,12 @@ struct DeleteMountPoint {}
 /// A request to list the mount points.
 struct ListMountPoints {}
 
+//==================================================================================================
+// Driver
+//==================================================================================================
+
 /// The file system driver.
+// Seems like the driver needs to maintain a list of mount points.
 pub struct FileSystem {}
 
 impl FileSystem {
@@ -139,3 +150,7 @@ pub extern "C" fn file_system_run() -> Status {
         Err(status) => status,
     }
 }
+
+//==================================================================================================
+// Miscellaneous
+//==================================================================================================

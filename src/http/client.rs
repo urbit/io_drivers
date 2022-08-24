@@ -22,6 +22,10 @@ use tokio::{
     task::JoinHandle,
 };
 
+//==================================================================================================
+// Request types
+//==================================================================================================
+
 /// Requests that can be handled by the HTTP client driver.
 enum Request {
     SendRequest(SendRequest),
@@ -150,52 +154,9 @@ impl TryFromNoun<&Noun> for CancelRequest {
     }
 }
 
-/// A response to an HTTP request.
-#[derive(Debug)]
-struct HyperResponse {
-    req_num: u64,
-    parts: Parts,
-    body: Bytes,
-}
-
-impl TryIntoNoun<Noun> for HyperResponse {
-    type Error = header::ToStrError;
-
-    fn try_into_noun(self) -> Result<Noun, Self::Error> {
-        let req_num = Atom::from(self.req_num).into_rc_noun();
-        let status = Atom::from(self.parts.status.as_u16()).into_rc_noun();
-        let null = Atom::null().into_rc_noun();
-
-        let headers = {
-            let mut headers_cell = null.clone();
-            let headers = &self.parts.headers;
-            for key in headers.keys().map(|k| k.as_str()) {
-                let vals = headers.get_all(key);
-                let key = Atom::from(key).into_rc_noun();
-                for val in vals {
-                    let val = Atom::from(val.to_str()?).into_rc_noun();
-                    headers_cell =
-                        Cell::from([Cell::from([key.clone(), val]).into_rc_noun(), headers_cell])
-                            .into_rc_noun();
-                }
-            }
-            headers_cell
-        };
-
-        let body = {
-            let body = self.body.to_vec();
-            if body.is_empty() {
-                null
-            } else {
-                let body_len = Atom::from(body.len());
-                let body = Atom::from(body);
-                Cell::from([null, Cell::from([body_len, body]).into_rc_noun()]).into_rc_noun()
-            }
-        };
-
-        Ok(Cell::from([req_num, status, headers, body]).into_noun())
-    }
-}
+//==================================================================================================
+// Driver
+//==================================================================================================
 
 /// The HTTP client driver.
 pub struct HttpClient {
@@ -384,6 +345,61 @@ pub extern "C" fn http_client_run() -> Status {
         Err(status) => status,
     }
 }
+
+//==================================================================================================
+// Miscellaneous
+//==================================================================================================
+
+/// A response to an HTTP request.
+#[derive(Debug)]
+struct HyperResponse {
+    req_num: u64,
+    parts: Parts,
+    body: Bytes,
+}
+
+impl TryIntoNoun<Noun> for HyperResponse {
+    type Error = header::ToStrError;
+
+    fn try_into_noun(self) -> Result<Noun, Self::Error> {
+        let req_num = Atom::from(self.req_num).into_rc_noun();
+        let status = Atom::from(self.parts.status.as_u16()).into_rc_noun();
+        let null = Atom::null().into_rc_noun();
+
+        let headers = {
+            let mut headers_cell = null.clone();
+            let headers = &self.parts.headers;
+            for key in headers.keys().map(|k| k.as_str()) {
+                let vals = headers.get_all(key);
+                let key = Atom::from(key).into_rc_noun();
+                for val in vals {
+                    let val = Atom::from(val.to_str()?).into_rc_noun();
+                    headers_cell =
+                        Cell::from([Cell::from([key.clone(), val]).into_rc_noun(), headers_cell])
+                            .into_rc_noun();
+                }
+            }
+            headers_cell
+        };
+
+        let body = {
+            let body = self.body.to_vec();
+            if body.is_empty() {
+                null
+            } else {
+                let body_len = Atom::from(body.len());
+                let body = Atom::from(body);
+                Cell::from([null, Cell::from([body_len, body]).into_rc_noun()]).into_rc_noun()
+            }
+        };
+
+        Ok(Cell::from([req_num, status, headers, body]).into_noun())
+    }
+}
+
+//==================================================================================================
+// Tests
+//==================================================================================================
 
 #[cfg(test)]
 mod tests {

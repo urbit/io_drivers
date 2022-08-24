@@ -22,6 +22,10 @@ use tokio::{
     task::JoinHandle,
 };
 
+//==================================================================================================
+// Driver
+//==================================================================================================
+
 type Channel<T> = (Sender<T>, Receiver<T>);
 
 /// The return status of a driver.
@@ -199,10 +203,7 @@ where
     /// Spawns a task to write outgoing IO responses to an output sink.
     ///
     /// This task is referred to as the "output task".
-    fn send_responses(
-        mut output_rx: Receiver<Noun>,
-        mut output_sink: O,
-    ) -> JoinHandle<Status> {
+    fn send_responses(mut output_rx: Receiver<Noun>, mut output_sink: O) -> JoinHandle<Status> {
         let task = tokio::spawn(async move {
             const FLUSH_RETRY_MAX: usize = 5;
             debug!(
@@ -275,6 +276,10 @@ where
         task
     }
 }
+
+//==================================================================================================
+// Miscellaneous
+//==================================================================================================
 
 /// Converts an atom into a string, returning a `convert::Error` if the operation failed.
 ///
