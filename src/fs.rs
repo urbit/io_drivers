@@ -164,16 +164,16 @@ pub extern "C" fn file_system_run() -> Status {
 /// A `$knot` is simply an ASCII string.
 struct Knot<A: Atomish>(A);
 
-impl Nounish for Knot<&Atom> {}
-
 impl Nounish for Knot<Atom> {}
+
+impl Nounish for Knot<&Atom> {}
 
 /// A list of `$knot`.
 struct KnotList<C: Cellish>(C);
 
-impl Nounish for KnotList<&Cell> {}
-
 impl Nounish for KnotList<Cell> {}
+
+impl Nounish for KnotList<&Cell> {}
 
 /// A component of a file system path.
 struct PathComponent(String);
