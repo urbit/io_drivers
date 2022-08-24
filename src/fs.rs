@@ -1,9 +1,13 @@
 use crate::{atom_as_str, Driver, Status};
-use log::{debug, warn};
+use log::debug;
 use noun::{
-    convert::{self, TryFromNoun},
+    atom::Atom,
+    cell::Cell,
+    convert::{self, TryFromNoun, TryIntoNoun},
+    marker::Nounish,
     Noun,
 };
+use std::path;
 use tokio::{
     io::{self, Stdin, Stdout},
     sync::mpsc::{Receiver, Sender},
@@ -86,19 +90,19 @@ struct ListMountPoints {}
 pub struct FileSystem {}
 
 impl FileSystem {
-    fn update_file_system(&self, req: UpdateFileSystem) {
+    fn update_file_system(&self, _req: UpdateFileSystem) {
         todo!()
     }
 
-    fn commit_mount_point(&self, req: CommitMountPoint) {
+    fn commit_mount_point(&self, _req: CommitMountPoint) {
         todo!()
     }
 
-    fn delete_mount_point(&self, req: DeleteMountPoint) {
+    fn delete_mount_point(&self, _req: DeleteMountPoint) {
         todo!()
     }
 
-    fn list_mount_points(&self, req: ListMountPoints) {
+    fn list_mount_points(&self, _req: ListMountPoints) {
         todo!()
     }
 }
@@ -154,3 +158,66 @@ pub extern "C" fn file_system_run() -> Status {
 //==================================================================================================
 // Miscellaneous
 //==================================================================================================
+
+/// A `$knot`.
+///
+/// A `$knot` is simply an ASCII string.
+struct Knot<'a>(&'a Atom);
+
+impl<'a> Nounish for Knot<'a> {}
+
+/// A component of a file system path.
+struct PathComponent(String);
+
+impl TryFromNoun<Knot<'_>> for PathComponent {
+    fn try_from_noun(knot: Knot) -> Result<Self, convert::Error> {
+        let knot = atom_as_str(knot.0)?;
+        // A path component should not have a path separator in it.
+        if knot.contains(path::MAIN_SEPARATOR) {
+            return Err(convert::Error::ImplType);
+        }
+        // The empty knot (`%$`), `.` knot, `..` knot, and any knots beginning with `!`
+        // must be escaped by prepending a `!` to the path component.
+        let path_component =
+            if knot.is_empty() || knot == "." || knot == ".." || knot.chars().nth(0) == Some('!') {
+                format!("!{}", knot)
+            } else {
+                knot.to_string()
+            };
+        Ok(Self(path_component))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn try_from_knot() -> Result<(), convert::Error> {
+        macro_rules! test {
+            (knot: $knot:literal, path_component: $path_component:literal) => {
+                let atom = Atom::from($knot);
+                let knot = Knot(&atom);
+                let path_component = PathComponent::try_from_noun(knot)?;
+                assert_eq!(path_component.0, $path_component);
+            };
+            (knot: $knot:expr) => {
+                let atom = Atom::from($knot);
+                let knot = Knot(&atom);
+                assert!(PathComponent::try_from_noun(knot).is_err());
+            };
+        }
+
+        test!(knot: "hello", path_component: "hello");
+        test!(knot: "wow this is a long component", path_component: "wow this is a long component");
+        test!(knot: "", path_component: "!");
+        test!(knot: ".", path_component: "!.");
+        test!(knot: "..", path_component: "!..");
+        test!(knot: "!bu4hao3yi4si", path_component: "!!bu4hao3yi4si");
+        test!(knot: format!("{}at-the-beginning", path::MAIN_SEPARATOR));
+        test!(knot: format!("at-the-end{}", path::MAIN_SEPARATOR));
+        test!(knot: format!("in{}between", path::MAIN_SEPARATOR));
+
+        Ok(())
+    }
+}
