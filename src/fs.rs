@@ -2,9 +2,8 @@ use crate::{atom_as_str, Driver, Status};
 use log::debug;
 use noun::{
     atom::Atom,
-    cell::Cell,
     convert::{self, TryFromNoun, TryIntoNoun},
-    marker::Nounish,
+    marker::{Atomish, Nounish},
     Noun,
 };
 use std::path;
@@ -162,15 +161,17 @@ pub extern "C" fn file_system_run() -> Status {
 /// A `$knot`.
 ///
 /// A `$knot` is simply an ASCII string.
-struct Knot<'a>(&'a Atom);
+struct Knot<A: Atomish>(A);
 
-impl<'a> Nounish for Knot<'a> {}
+impl Nounish for Knot<&Atom> {}
+
+impl Nounish for Knot<Atom> {}
 
 /// A component of a file system path.
 struct PathComponent(String);
 
-impl TryFromNoun<Knot<'_>> for PathComponent {
-    fn try_from_noun(knot: Knot) -> Result<Self, convert::Error> {
+impl TryFromNoun<Knot<&Atom>> for PathComponent {
+    fn try_from_noun(knot: Knot<&Atom>) -> Result<Self, convert::Error> {
         let knot = atom_as_str(knot.0)?;
         // A path component should not have a path separator in it.
         if knot.contains(path::MAIN_SEPARATOR) {
@@ -185,6 +186,27 @@ impl TryFromNoun<Knot<'_>> for PathComponent {
                 knot.to_string()
             };
         Ok(Self(path_component))
+    }
+}
+
+impl TryIntoNoun<Knot<Atom>> for PathComponent {
+    type Error = ();
+
+    fn try_into_noun(self) -> Result<Knot<Atom>, Self::Error> {
+        // This is unlikely to ever occur because a [`PathComponent`] should only ever be created
+        // using [`TryFromNoun<Knot<&Atom>>`], but we check when compiling in debug mode just to be
+        // safe.
+        #[cfg(debug_assertions)]
+        if self.0.contains(path::MAIN_SEPARATOR) {
+            return Err(());
+        }
+
+        let knot = if self.0.chars().nth(0) == Some('!') {
+            &self.0[1..]
+        } else {
+            &self.0[..]
+        };
+        Ok(Knot(Atom::from(knot)))
     }
 }
 
@@ -217,6 +239,45 @@ mod tests {
         test!(knot: format!("{}at-the-beginning", path::MAIN_SEPARATOR));
         test!(knot: format!("at-the-end{}", path::MAIN_SEPARATOR));
         test!(knot: format!("in{}between", path::MAIN_SEPARATOR));
+
+        Ok(())
+    }
+
+    #[test]
+    fn try_into_knot() -> Result<(), ()> {
+        macro_rules! test {
+            (path_component: $path_component:literal, knot: $knot:literal) => {
+                let path_component = PathComponent($path_component.to_string());
+                let knot = path_component.try_into_noun()?;
+                assert_eq!(knot.0, $knot);
+            };
+            (path_component: $path_component:expr) => {
+                let path_component = PathComponent($path_component.to_string());
+                assert!(path_component.try_into_noun().is_err());
+            };
+        }
+
+        test!(path_component: "goodbye", knot: "goodbye");
+        test!(path_component: "a_little_longer", knot: "a_little_longer");
+        test!(path_component: "!", knot: "");
+        test!(path_component: "!.", knot: ".");
+        test!(path_component: "!..", knot: "..");
+        test!(path_component: "!!double-down", knot: "!double-down");
+
+        #[cfg(debug_assertions)]
+        {
+            test!(path_component: format!("{}start", path::MAIN_SEPARATOR));
+            test!(path_component: format!("end{}", path::MAIN_SEPARATOR));
+            test!(
+                path_component:
+                    format!(
+                        "neither{}start{}nor{}end",
+                        path::MAIN_SEPARATOR,
+                        path::MAIN_SEPARATOR,
+                        path::MAIN_SEPARATOR
+                    )
+            );
+        }
 
         Ok(())
     }
