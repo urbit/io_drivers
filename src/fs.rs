@@ -1,4 +1,4 @@
-use crate::{atom_as_str, Driver, Status, QUEUE_SIZE};
+use crate::{atom_as_str, Driver, Status};
 use log::{debug, warn};
 use noun::{
     convert::{self, TryFromNoun},
@@ -135,7 +135,7 @@ impl_driver!(Stdin, Stdout);
 #[no_mangle]
 pub extern "C" fn file_system_run() -> Status {
     match FileSystem::new() {
-        Ok(driver) => driver.run::<QUEUE_SIZE>(io::stdin(), io::stdout()),
+        Ok(driver) => driver.run(io::stdin(), io::stdout()),
         Err(status) => status,
     }
 }

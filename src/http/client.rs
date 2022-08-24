@@ -1,4 +1,4 @@
-use crate::{atom_as_str, Driver, Status, QUEUE_SIZE};
+use crate::{atom_as_str, Driver, Status};
 use hyper::{
     body::{self, Bytes},
     client::{Client, HttpConnector},
@@ -380,7 +380,7 @@ impl_driver!(Stdin, Stdout);
 #[no_mangle]
 pub extern "C" fn http_client_run() -> Status {
     match HttpClient::new() {
-        Ok(driver) => driver.run::<QUEUE_SIZE>(io::stdin(), io::stdout()),
+        Ok(driver) => driver.run(io::stdin(), io::stdout()),
         Err(status) => status,
     }
 }

@@ -24,9 +24,6 @@ use tokio::{
 
 type Channel<T> = (Sender<T>, Receiver<T>);
 
-/// Max number of items in a [`Channel`].
-const QUEUE_SIZE: usize = 32;
-
 /// The return status of a driver.
 #[derive(Eq, PartialEq)]
 #[repr(u8)]
@@ -78,13 +75,13 @@ where
     /// Returns the name of the driver.
     fn name() -> &'static str;
 
-    /// Spawns a task to asynchronously handle IO requests.
+    /// Spawns a blocking task to asynchronously handle IO requests.
     ///
     /// This is the driver entry point.
     ///
     /// Handles requests as long as the input source is open. Responses are sent to the output
     /// sink.
-    fn run<const QUEUE_SIZE: usize>(self, input_src: I, output_sink: O) -> Status {
+    fn run(self, input_src: I, output_sink: O) -> Status {
         let runtime = runtime::Builder::new_multi_thread().enable_all().build();
         if let Err(err) = runtime {
             error!(
@@ -94,6 +91,7 @@ where
             return Status::NoRuntime;
         }
         runtime.unwrap().block_on(async {
+            const QUEUE_SIZE: usize = 32;
             // Channel from input task to handling task.
             let (input_tx, input_rx): Channel<Noun> = mpsc::channel(QUEUE_SIZE);
             // Channel from handling task to output task.
@@ -101,7 +99,7 @@ where
 
             let input_task = Self::recv_requests(input_src, input_tx);
             let handling_task = self.handle_requests(input_rx, output_tx);
-            let output_task = Self::send_responses::<5>(output_rx, output_sink);
+            let output_task = Self::send_responses(output_rx, output_sink);
 
             // TODO: handle errors.
             input_task.await.unwrap();
@@ -201,11 +199,12 @@ where
     /// Spawns a task to write outgoing IO responses to an output sink.
     ///
     /// This task is referred to as the "output task".
-    fn send_responses<const FLUSH_RETRY_MAX: usize>(
+    fn send_responses(
         mut output_rx: Receiver<Noun>,
         mut output_sink: O,
     ) -> JoinHandle<Status> {
         let task = tokio::spawn(async move {
+            const FLUSH_RETRY_MAX: usize = 5;
             debug!(
                 target: Self::name(),
                 "max flush retry attempts = {}", FLUSH_RETRY_MAX
