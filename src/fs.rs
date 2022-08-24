@@ -285,21 +285,6 @@ impl TryIntoNoun<KnotList<Cell>> for Path {
     }
 }
 
-/// A mount point.
-struct MountPoint(PathComponent);
-
-/// Attempts to create a [`MountPoint`] from a [`&Noun`].
-impl TryFromNoun<&Noun> for MountPoint {
-    fn try_from_noun(mount_point: &Noun) -> Result<Self, convert::Error> {
-        if let Noun::Atom(mount_point) = mount_point {
-            let mount_point = PathComponent::try_from_noun(Knot(mount_point))?;
-            Ok(Self(mount_point))
-        } else {
-            Err(convert::Error::UnexpectedCell)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
