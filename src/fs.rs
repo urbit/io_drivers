@@ -231,6 +231,7 @@ struct Path(PathBuf);
 impl TryFromNoun<KnotList<&Cell>> for Path {
     fn try_from_noun(knot_list: KnotList<&Cell>) -> Result<Self, convert::Error> {
         let mut path = PathBuf::new();
+        // TODO: determine if is `knot_list` null-terminated.
         for knot in knot_list.0.to_vec() {
             if let Noun::Atom(knot) = &*knot {
                 let path_component = PathComponent::try_from_noun(Knot(knot))?;
@@ -254,6 +255,7 @@ impl TryIntoNoun<KnotList<Cell>> for Path {
             let knot = path_component.try_into_noun()?;
             path_components.push(knot.0.into_rc_noun());
         }
+        // TODO: determine if `Atom::null()` should be pushed onto `path_components`.
         Ok(KnotList(Cell::from(path_components)))
     }
 }
