@@ -4,7 +4,7 @@ use noun::{
     atom::Atom,
     cell::Cell,
     convert,
-    marker::{Atomish, Cellish, Nounish},
+    marker::{Atomish, Cellish},
     Noun, Rc,
 };
 use std::{
@@ -219,10 +219,6 @@ pub extern "C" fn file_system_run() -> Status {
 /// A `$knot` is simply an ASCII string.
 struct Knot<A: Atomish>(A);
 
-impl Nounish for Knot<Atom> {}
-
-impl Nounish for Knot<&Atom> {}
-
 /// Attempts to create a [`Knot`] from a [`PathComponent`].
 impl TryFrom<PathComponent> for Knot<Atom> {
     type Error = ();
@@ -247,10 +243,6 @@ impl TryFrom<PathComponent> for Knot<Atom> {
 
 /// A list of `$knot`.
 struct KnotList<C: Cellish>(C);
-
-impl Nounish for KnotList<Cell> {}
-
-impl Nounish for KnotList<&Cell> {}
 
 /// Attempts to create a [`KnotList`] from a [`Path`].
 impl TryFrom<Path> for KnotList<Cell> {
