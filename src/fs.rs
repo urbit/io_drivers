@@ -10,7 +10,7 @@ use noun::{
 use std::{
     collections::HashMap,
     fs,
-    path::{self, PathBuf},
+    path::{self, Path, PathBuf},
 };
 use tokio::{
     io::{self, Stdin, Stdout},
@@ -143,7 +143,7 @@ pub struct FileSystem {
     /// The root of file system tree managed by the driver.
     ///
     /// This is the pier directory.
-    root_dir: Path,
+    root_dir: PathBuf,
 
     /// A map from mount point name to mount point.
     mount_points: HashMap<String, MountPoint>,
@@ -267,12 +267,12 @@ impl TryFrom<PathComponent> for Knot<Atom> {
 struct KnotList<C: Cellish>(C);
 
 /// Attempts to create a [`KnotList`] from a [`Path`].
-impl TryFrom<Path> for KnotList<Cell> {
+impl TryFrom<&Path> for KnotList<Cell> {
     type Error = ();
 
-    fn try_from(path: Path) -> Result<Self, Self::Error> {
+    fn try_from(path: &Path) -> Result<Self, Self::Error> {
         let mut path_components = Vec::new();
-        for path_component in path.0.components() {
+        for path_component in path.components() {
             let path_component =
                 PathComponent(path_component.as_os_str().to_str().ok_or(())?.to_string());
             let knot = Knot::try_from(path_component)?;
@@ -287,8 +287,8 @@ impl TryFrom<Path> for KnotList<Cell> {
 struct PathComponent(String);
 
 /// Enables a [`PathComponent`] to be pushed onto a [`std::path::Path`] or [`std::path::PathBuf`].
-impl AsRef<path::Path> for PathComponent {
-    fn as_ref(&self) -> &path::Path {
+impl AsRef<Path> for PathComponent {
+    fn as_ref(&self) -> &Path {
         self.0.as_ref()
     }
 }
@@ -315,11 +315,8 @@ impl TryFrom<Knot<&Atom>> for PathComponent {
     }
 }
 
-/// A file system path.
-struct Path(PathBuf);
-
-/// Attempts to create a [`Path`] from a [`KnotList`].
-impl TryFrom<KnotList<&Cell>> for Path {
+/// Attempts to create a [`PathBuf`] from a [`KnotList`].
+impl TryFrom<KnotList<&Cell>> for PathBuf {
     type Error = convert::Error;
 
     fn try_from(knot_list: KnotList<&Cell>) -> Result<Self, Self::Error> {
@@ -333,7 +330,7 @@ impl TryFrom<KnotList<&Cell>> for Path {
                 return Err(convert::Error::UnexpectedCell);
             }
         }
-        Ok(Self(path))
+        Ok(path)
     }
 }
 
@@ -347,8 +344,8 @@ struct MountPoint {
 
 impl MountPoint {
     /// Creates a new mount point.
-    fn new(name: PathComponent, parent_dir: &mut Path) -> io::Result<Self> {
-        let mut path = &mut parent_dir.0;
+    fn new(name: PathComponent, parent_dir: &mut PathBuf) -> io::Result<Self> {
+        let mut path = parent_dir;
         path.push(name);
         match fs::read_dir(&path) {
             Ok(dir) => {
@@ -482,25 +479,25 @@ mod tests {
             (knot_list: $knot_list:expr, path: $path:literal) => {
                 let cell = Cell::from($knot_list);
                 let knot_list = KnotList(&cell);
-                let path = Path::try_from(knot_list).expect("path from knot list");
-                assert_eq!(path.0, path::Path::new($path));
+                let path = PathBuf::try_from(knot_list).expect("path from knot list");
+                assert_eq!(path, path::Path::new($path));
             };
             // `KnotList` -> `Path`: expect failure.
             (knot_list: $knot_list:expr) => {
                 let cell = Cell::from($knot_list);
                 let knot_list = KnotList(&cell);
-                assert!(Path::try_from(knot_list).is_err());
+                assert!(PathBuf::try_from(knot_list).is_err());
             };
             // `Path` -> `KnotList`: expect success.
             (path: $path:literal, knot_list: $knot_list:expr) => {
-                let path = Path(PathBuf::from($path));
-                let knot_list = KnotList::try_from(path).expect("knot list from path");
+                let path = PathBuf::from($path);
+                let knot_list = KnotList::try_from(path.as_path()).expect("knot list from path");
                 assert_eq!(knot_list.0, Cell::from($knot_list))
             };
             // `Path` -> `KnotList`: expect failure.
             (path: $path:expr) => {
-                let path = Path(PathBuf::from($path));
-                assert!(KnotList::try_from(path).is_err());
+                let path = PathBuf::from($path);
+                assert!(KnotList::try_from(path.as_path()).is_err());
             };
         }
 
