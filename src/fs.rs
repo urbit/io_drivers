@@ -155,8 +155,14 @@ impl FileSystem {
         todo!()
     }
 
-    fn list_mount_points(&self, _req: ListMountPoints) {
-        todo!()
+    fn list_mount_points(&mut self, req: ListMountPoints) {
+        for key in req.mount_points {
+            if !self.mount_points.contains_key(&key) {
+                let mount_point = MountPoint::new(&key[..]);
+                self.mount_points.insert(key.clone(), mount_point);
+            }
+            let mount_point = self.mount_points.get(&key).unwrap();
+        }
     }
 }
 
@@ -175,7 +181,7 @@ macro_rules! impl_driver {
             }
 
             fn handle_requests(
-                self,
+                mut self,
                 mut input_rx: Receiver<Noun>,
                 _output_tx: Sender<Noun>,
             ) -> JoinHandle<Status> {
@@ -316,7 +322,50 @@ impl TryFrom<KnotList<&Cell>> for Path {
 }
 
 /// A file system mount point.
-struct MountPoint {}
+struct MountPoint {
+    /// The name of the mount point.
+    name: PathComponent,
+
+    /// The mount point's parent directory. `None` if the mount point is the root directory.
+    parent_dir: Option<Path>,
+}
+
+impl MountPoint {
+    /// Creates a new mount point.
+    fn new(name: &str) -> Self {
+        todo!()
+    }
+}
+
+/// A file system entry monitored by the driver.
+enum Entry<'a> {
+    Directory(Directory<'a>),
+    File(File<'a>),
+}
+
+/// A directory monitored by the driver.
+struct Directory<'a> {
+    /// The name of the directory.
+    name: PathComponent,
+
+    /// The mount point that the directory lies under.
+    mount_point: &'a MountPoint,
+
+    /// The directory's parent directory. `None` if the parent directory is a mount point.
+    parent_dir: Option<&'a Directory<'a>>,
+
+    /// The files and directories within the directory.
+    children: HashMap<PathComponent, Entry<'a>>,
+}
+
+/// A file monitored by the driver.
+struct File<'a> {
+    /// The name of the file.
+    name: PathComponent,
+
+    /// The file's parent directory.
+    parent_dir: Directory<'a>,
+}
 
 #[cfg(test)]
 mod tests {
