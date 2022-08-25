@@ -139,6 +139,12 @@ impl TryFrom<&Noun> for ScanMountPoints {
 
 /// The file system driver.
 pub struct FileSystem {
+    /// The root of file system tree managed by the driver.
+    ///
+    /// This is the pier directory.
+    root_dir: Path,
+
+    /// A map from mount point name to mount point.
     mount_points: HashMap<String, MountPoint>,
 }
 
