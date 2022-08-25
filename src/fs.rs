@@ -164,16 +164,16 @@ impl FileSystem {
     }
 
     fn scan_mount_points(&mut self, req: ScanMountPoints) {
-        for key in req.mount_points {
-            if !self.mount_points.contains_key(&key) {
-                match MountPoint::new(PathComponent(key.clone()), &mut self.root_dir) {
+        for name in req.mount_points {
+            if !self.mount_points.contains_key(&name) {
+                match MountPoint::new(PathComponent(name.clone()), &mut self.root_dir) {
                     Ok(mount_point) => {
-                        self.mount_points.insert(key, mount_point);
+                        self.mount_points.insert(name, mount_point);
                     }
                     Err(err) => {
                         warn!(
                             target: Self::name(),
-                            "failed to scan %{} mount point: {}", key, err
+                            "failed to scan %{} mount point: {}", name, err
                         );
                     }
                 }
@@ -287,6 +287,7 @@ impl TryFrom<&Path> for KnotList<Cell> {
 /// A component of a file system path.
 ///
 /// A [`PathComponent`] is guaranteed to never be `.` or `..`.
+#[derive(Clone, Eq, Hash, PartialEq)]
 struct PathComponent(String);
 
 /// Enables a [`PathComponent`] to be pushed onto a [`std::path::Path`] or [`std::path::PathBuf`].
@@ -349,46 +350,65 @@ impl TryFrom<KnotList<&Cell>> for PathBuf {
     }
 }
 
+//==================================================================================================
+// File System Entries
+//==================================================================================================
+
+/// Collects the entries of a directory that are valid [`PathComponent`]s.
+///
+/// `.` and `..` are omitted from the map of returned entries because they are not valid
+/// [`PathComponent`]s.
+fn read_dir(path: &Path) -> io::Result<HashMap<PathComponent, Entry>> {
+    let mut entries = HashMap::new();
+    for entry in fs::read_dir(path)? {
+        let path = entry?.path();
+        if let Some(name) = path.file_name() {
+            if let Ok(name) = PathComponent::try_from(name) {
+                let entry = if path.is_dir() {
+                    Entry::Directory(Directory {
+                        name: name.clone(),
+                        children: HashMap::new(),
+                    })
+                } else if path.is_file() {
+                    Entry::File(File { name: name.clone() })
+                } else if path.is_symlink() {
+                    todo!()
+                } else {
+                    continue;
+                };
+                entries.insert(name, entry);
+            }
+        }
+    }
+    Ok(entries)
+}
+
 /// A file system mount point.
 ///
 /// All mount points reside within the root directory of a ship (i.e. the pier directory).
 struct MountPoint {
     /// The name of the mount point.
     name: PathComponent,
+
+    /// The topmost files and directories within the mount point.
+    children: HashMap<PathComponent, Entry>,
 }
 
 impl MountPoint {
     /// Creates a new mount point.
     fn new(name: PathComponent, parent_dir: &mut PathBuf) -> io::Result<Self> {
-        let mut path = parent_dir;
-        path.push(name);
-        match fs::read_dir(&path) {
-            Ok(dir) => {
-                for entry in dir {
-                    let entry = entry?;
-                    let file_type = entry.file_type()?;
-                    if file_type.is_dir() {
-                        todo!()
-                    } else if file_type.is_file() {
-                        todo!()
-                    } else if file_type.is_symlink() {
-                        todo!()
-                    } else {
-                        warn!(
-                            target: FileSystem::name(),
-                            "cannot determine file type of {}",
-                            entry.path().display()
-                        );
-                    }
-                }
+        let path = parent_dir;
+        path.push(&name);
+        match read_dir(path) {
+            Ok(children) => {
+                path.pop();
+                Ok(Self { name, children })
             }
             Err(err) => {
                 path.pop();
-                return Err(err);
+                Err(err)
             }
         }
-        path.pop();
-        todo!()
     }
 }
 
