@@ -26,7 +26,7 @@ enum Request {
     UpdateFileSystem(UpdateFileSystem),
     CommitMountPoint(CommitMountPoint),
     DeleteMountPoint(DeleteMountPoint),
-    ListMountPoints(ListMountPoints),
+    ScanMountPoints(ScanMountPoints),
 }
 
 impl TryFrom<Noun> for Request {
@@ -93,17 +93,17 @@ struct CommitMountPoint {}
 /// A request to delete a mount point.
 struct DeleteMountPoint {}
 
-/// A request to list the mount points.
-struct ListMountPoints {
-    /// The names of the mount points to list.
+/// A request to scan a list of mount points.
+struct ScanMountPoints {
+    /// The names of the mount points to scan.
     mount_points: Vec<String>,
 }
 
-impl TryFrom<&Noun> for ListMountPoints {
+impl TryFrom<&Noun> for ScanMountPoints {
     type Error = convert::Error;
 
-    /// Attempts to create a [`ListMountPoints`] request from the tail of a noun that was tagged
-    /// with `%hill`, where `%hill` is a poor choice of tag name for a "list mount points" request.
+    /// Attempts to create a [`ScanMountPoints`] request from the tail of a noun that was tagged
+    /// with `%hill`, where `%hill` is a poor choice of tag name for a "scan mount points" request.
     ///
     /// A properly structured noun is a null-terminated list of mount points, each of which is an
     /// atom. For example:
@@ -155,7 +155,7 @@ impl FileSystem {
         todo!()
     }
 
-    fn list_mount_points(&mut self, req: ListMountPoints) {
+    fn scan_mount_points(&mut self, req: ScanMountPoints) {
         for key in req.mount_points {
             if !self.mount_points.contains_key(&key) {
                 let mount_point = MountPoint::new(&key[..]);
@@ -191,7 +191,7 @@ macro_rules! impl_driver {
                             Ok(Request::UpdateFileSystem(req)) => self.update_file_system(req),
                             Ok(Request::CommitMountPoint(req)) => self.commit_mount_point(req),
                             Ok(Request::DeleteMountPoint(req)) => self.delete_mount_point(req),
-                            Ok(Request::ListMountPoints(req)) => self.list_mount_points(req),
+                            Ok(Request::ScanMountPoints(req)) => self.scan_mount_points(req),
                             _ => todo!(),
                         }
                     }
