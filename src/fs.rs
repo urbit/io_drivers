@@ -1,5 +1,5 @@
 use crate::{atom_as_str, Driver, Status};
-use log::debug;
+use log::{debug, warn};
 use noun::{
     atom::Atom,
     cell::Cell,
@@ -9,6 +9,7 @@ use noun::{
 };
 use std::{
     collections::HashMap,
+    fs,
     path::{self, PathBuf},
 };
 use tokio::{
@@ -164,8 +165,17 @@ impl FileSystem {
     fn scan_mount_points(&mut self, req: ScanMountPoints) {
         for key in req.mount_points {
             if !self.mount_points.contains_key(&key) {
-                let mount_point = MountPoint::new(PathComponent(key.clone()));
-                self.mount_points.insert(key, mount_point);
+                match MountPoint::new(PathComponent(key.clone()), &mut self.root_dir) {
+                    Ok(mount_point) => {
+                        self.mount_points.insert(key, mount_point);
+                    }
+                    Err(err) => {
+                        warn!(
+                            target: Self::name(),
+                            "failed to scan %{} mount point: {}", key, err
+                        );
+                    }
+                }
             }
         }
     }
@@ -177,6 +187,7 @@ macro_rules! impl_driver {
         impl Driver<$input_src, $output_sink> for FileSystem {
             fn new() -> Result<Self, Status> {
                 Ok(Self {
+                    root_dir: todo!(),
                     mount_points: HashMap::new(),
                 })
             }
@@ -336,7 +347,35 @@ struct MountPoint {
 
 impl MountPoint {
     /// Creates a new mount point.
-    fn new(name: PathComponent) -> Self {
+    fn new(name: PathComponent, parent_dir: &mut Path) -> io::Result<Self> {
+        let mut path = &mut parent_dir.0;
+        path.push(name);
+        match fs::read_dir(&path) {
+            Ok(dir) => {
+                for entry in dir {
+                    let entry = entry?;
+                    let file_type = entry.file_type()?;
+                    if file_type.is_dir() {
+                        todo!()
+                    } else if file_type.is_file() {
+                        todo!()
+                    } else if file_type.is_symlink() {
+                        todo!()
+                    } else {
+                        warn!(
+                            target: FileSystem::name(),
+                            "cannot determine file type of {}",
+                            entry.path().display()
+                        );
+                    }
+                }
+            }
+            Err(err) => {
+                path.pop();
+                return Err(err);
+            }
+        }
+        path.pop();
         todo!()
     }
 }
