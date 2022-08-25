@@ -8,12 +8,7 @@ use hyper::{
 };
 use hyper_rustls::{ConfigBuilderExt, HttpsConnector, HttpsConnectorBuilder};
 use log::{debug, info, warn};
-use noun::{
-    atom::Atom,
-    cell::Cell,
-    convert::{self, IntoNoun, TryFromNoun, TryIntoNoun},
-    Noun,
-};
+use noun::{atom, atom::Atom, cell, cell::Cell, convert, Noun};
 use rustls::ClientConfig;
 use std::collections::HashMap;
 use tokio::{
@@ -32,16 +27,16 @@ enum Request {
     CancelRequest(CancelRequest),
 }
 
-impl TryFromNoun<Noun> for Request {
-    fn try_from_noun(req: Noun) -> Result<Self, convert::Error> {
+impl TryFrom<Noun> for Request {
+    type Error = convert::Error;
+
+    fn try_from(req: Noun) -> Result<Self, Self::Error> {
         if let Noun::Cell(req) = req {
             let (tag, data) = req.into_parts();
             if let Noun::Atom(tag) = &*tag {
                 match atom_as_str(tag)? {
-                    "request" => Ok(Self::SendRequest(SendRequest::try_from_noun(&*data)?)),
-                    "cancel-request" => {
-                        Ok(Self::CancelRequest(CancelRequest::try_from_noun(&*data)?))
-                    }
+                    "request" => Ok(Self::SendRequest(SendRequest::try_from(&*data)?)),
+                    "cancel-request" => Ok(Self::CancelRequest(CancelRequest::try_from(&*data)?)),
                     _ => Err(convert::Error::ImplType),
                 }
             } else {
@@ -60,8 +55,10 @@ struct SendRequest {
     req: HyperRequest<Body>,
 }
 
-impl TryFromNoun<&Noun> for SendRequest {
-    fn try_from_noun(data: &Noun) -> Result<Self, convert::Error> {
+impl TryFrom<&Noun> for SendRequest {
+    type Error = convert::Error;
+
+    fn try_from(data: &Noun) -> Result<Self, Self::Error> {
         if let Noun::Cell(data) = data {
             let [req_num, method, uri, headers, body] =
                 data.to_array::<5>().ok_or(convert::Error::MissingValue)?;
@@ -142,8 +139,10 @@ struct CancelRequest {
     req_num: u64,
 }
 
-impl TryFromNoun<&Noun> for CancelRequest {
-    fn try_from_noun(data: &Noun) -> Result<Self, convert::Error> {
+impl TryFrom<&Noun> for CancelRequest {
+    type Error = convert::Error;
+
+    fn try_from(data: &Noun) -> Result<Self, Self::Error> {
         if let Noun::Atom(req_num) = data {
             Ok(Self {
                 req_num: req_num.as_u64().ok_or(convert::Error::AtomToUint)?,
@@ -214,20 +213,23 @@ impl HttpClient {
                     req_num
                 );
 
-                let resp = match (HyperResponse {
-                    req_num: req.req_num,
-                    parts,
-                    body,
-                })
-                .try_into_noun()
-                {
-                    Ok(resp) => resp,
-                    Err(err) => {
-                        warn!(
-                            target: Self::name(),
-                            "failed to convert response to request #{} into noun: {}", req_num, err
-                        );
-                        return;
+                let resp = {
+                    let resp = HyperResponse {
+                        req_num: req.req_num,
+                        parts,
+                        body,
+                    };
+                    match Noun::try_from(resp) {
+                        Ok(resp) => resp,
+                        Err(err) => {
+                            warn!(
+                                target: Self::name(),
+                                "failed to convert response to request #{} into noun: {}",
+                                req_num,
+                                err
+                            );
+                            return;
+                        }
                     }
                 };
                 if let Err(_resp) = output_tx.send(resp).await {
@@ -302,7 +304,7 @@ macro_rules! impl_driver {
             ) -> JoinHandle<Status> {
                 let task = tokio::spawn(async move {
                     while let Some(req) = input_rx.recv().await {
-                        match Request::try_from_noun(req) {
+                        match Request::try_from(req) {
                             Ok(Request::SendRequest(req)) => {
                                 self.send_request(req, output_tx.clone())
                             }
@@ -358,42 +360,41 @@ struct HyperResponse {
     body: Bytes,
 }
 
-impl TryIntoNoun<Noun> for HyperResponse {
+impl TryFrom<HyperResponse> for Noun {
     type Error = header::ToStrError;
 
-    fn try_into_noun(self) -> Result<Noun, Self::Error> {
-        let req_num = Atom::from(self.req_num).into_rc_noun();
-        let status = Atom::from(self.parts.status.as_u16()).into_rc_noun();
+    fn try_from(resp: HyperResponse) -> Result<Self, Self::Error> {
+        let req_num = atom!(resp.req_num).into_rc_noun();
+        let status = atom!(resp.parts.status.as_u16()).into_rc_noun();
         let null = Atom::null().into_rc_noun();
 
         let headers = {
             let mut headers_cell = null.clone();
-            let headers = &self.parts.headers;
+            let headers = &resp.parts.headers;
             for key in headers.keys().map(|k| k.as_str()) {
                 let vals = headers.get_all(key);
-                let key = Atom::from(key).into_rc_noun();
+                let key = atom!(key).into_rc_noun();
                 for val in vals {
-                    let val = Atom::from(val.to_str()?).into_rc_noun();
+                    let val = atom!(val.to_str()?).into_rc_noun();
                     headers_cell =
-                        Cell::from([Cell::from([key.clone(), val]).into_rc_noun(), headers_cell])
-                            .into_rc_noun();
+                        cell![cell![key.clone(), val].into_rc_noun(), headers_cell].into_rc_noun();
                 }
             }
             headers_cell
         };
 
         let body = {
-            let body = self.body.to_vec();
+            let body = resp.body.to_vec();
             if body.is_empty() {
                 null
             } else {
-                let body_len = Atom::from(body.len());
-                let body = Atom::from(body);
-                Cell::from([null, Cell::from([body_len, body]).into_rc_noun()]).into_rc_noun()
+                let body_len = atom!(body.len());
+                let body = atom!(body);
+                cell![null, cell![body_len, body].into_rc_noun()].into_rc_noun()
             }
         };
 
-        Ok(Cell::from([req_num, status, headers, body]).into_noun())
+        Ok(Noun::from(cell!([req_num, status, headers, body])))
     }
 }
 
@@ -407,7 +408,7 @@ mod tests {
     use hyper::http::response;
 
     #[test]
-    fn response_into_noun() {
+    fn noun_from_response() {
         // [
         //   107
         //   [
@@ -448,36 +449,27 @@ mod tests {
                 body,
             };
 
-            let noun = resp.try_into_noun().expect("to noun");
-            let expected = Cell::from([
-                Atom::from(req_num).into_noun(),
-                Atom::from(200u8).into_noun(),
-                Cell::from([
-                    Cell::from([Atom::from("server"), Atom::from("nginx/1.14.0 (Ubuntu)")])
-                        .into_noun(),
-                    Cell::from([
-                        Atom::from("date"),
-                        Atom::from("Fri, 08 Jul 2022 16:43:50 GMT"),
-                    ])
-                    .into_noun(),
-                    Cell::from([Atom::from("content-type"), Atom::from("application/json")])
-                        .into_noun(),
-                    Cell::from([Atom::from("content-length"), Atom::from("14645")]).into_noun(),
-                    Cell::from([Atom::from("connection"), Atom::from("keep-alive")]).into_noun(),
-                    Cell::from([Atom::from("vary"), Atom::from("Accept-Encoding")]).into_noun(),
-                    Cell::from([Atom::from("vary"), Atom::from("Origin")]).into_noun(),
-                    Cell::from([Atom::from("x-cached"), Atom::from("HIT")]).into_noun(),
-                    Atom::from(0u8).into_noun(),
-                ])
-                .into_noun(),
-                Cell::from([
-                    Atom::from(0u8),
-                    Atom::from(59u8),
-                    Atom::from(r#"[{"jsonrpc":"2.0","id":"block number","result":"0xe67461"}]"#),
-                ])
-                .into_noun(),
-            ])
-            .into_noun();
+            let noun = Noun::try_from(resp).expect("noun from response");
+            let expected = Noun::from(cell![
+                Noun::from(atom!(req_num)),
+                Noun::from(atom!(200u8)),
+                Noun::from(cell![
+                    Noun::from(cell![atom!("server"), atom!("nginx/1.14.0 (Ubuntu)")]),
+                    Noun::from(cell![atom!("date"), atom!("Fri, 08 Jul 2022 16:43:50 GMT"),]),
+                    Noun::from(cell![atom!("content-type"), atom!("application/json")]),
+                    Noun::from(cell![atom!("content-length"), atom!("14645")]),
+                    Noun::from(cell![atom!("connection"), atom!("keep-alive")]),
+                    Noun::from(cell![atom!("vary"), atom!("Accept-Encoding")]),
+                    Noun::from(cell![atom!("vary"), atom!("Origin")]),
+                    Noun::from(cell![atom!("x-cached"), atom!("HIT")]),
+                    Noun::from(atom!(0u8)),
+                ]),
+                Noun::from(cell![
+                    atom!(0u8),
+                    atom!(59u8),
+                    atom!(r#"[{"jsonrpc":"2.0","id":"block number","result":"0xe67461"}]"#),
+                ]),
+            ]);
 
             // If this test starts failing, it may be because the headers are in a different
             // (though still correct order).

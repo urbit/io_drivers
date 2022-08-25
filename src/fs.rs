@@ -3,7 +3,7 @@ use log::debug;
 use noun::{
     atom::Atom,
     cell::Cell,
-    convert::{self, TryFromNoun, TryIntoNoun},
+    convert,
     marker::{Atomish, Cellish, Nounish},
     Noun,
 };
@@ -29,8 +29,10 @@ enum Request {
     ListMountPoints(ListMountPoints),
 }
 
-impl TryFromNoun<Noun> for Request {
-    fn try_from_noun(req: Noun) -> Result<Self, convert::Error> {
+impl TryFrom<Noun> for Request {
+    type Error = convert::Error;
+
+    fn try_from(req: Noun) -> Result<Self, Self::Error> {
         if let Noun::Cell(req) = req {
             let (tag, data) = req.into_parts();
             if let Noun::Atom(tag) = &*tag {
@@ -38,9 +40,7 @@ impl TryFromNoun<Noun> for Request {
                 // it here because they're determined by the kernel.
                 match atom_as_str(tag)? {
                     // Update the file system.
-                    "ergo" => Ok(Self::UpdateFileSystem(UpdateFileSystem::try_from_noun(
-                        &*data,
-                    )?)),
+                    "ergo" => Ok(Self::UpdateFileSystem(UpdateFileSystem::try_from(&*data)?)),
                     _ => todo!(),
                 }
             } else {
@@ -57,7 +57,9 @@ struct UpdateFileSystem {
     mount_point: String,
 }
 
-impl TryFromNoun<&Noun> for UpdateFileSystem {
+impl TryFrom<&Noun> for UpdateFileSystem {
+    type Error = convert::Error;
+
     /// Attempts to create a [`UpdateFileSystem`] request from the tail of a noun that was tagged
     /// with `%ergo`, where `%ergo` is a poor choice of tag name for an "update file system"
     /// request.
@@ -68,7 +70,7 @@ impl TryFromNoun<&Noun> for UpdateFileSystem {
     ///  / \
     /// mp  TODO
     /// ```
-    fn try_from_noun(data: &Noun) -> Result<Self, convert::Error> {
+    fn try_from(data: &Noun) -> Result<Self, Self::Error> {
         if let Noun::Cell(data) = &*data {
             if let Noun::Atom(mount_point) = &*data.head() {
                 // data.tail() is `can`, which is a null-terminated list of pairs
@@ -97,7 +99,9 @@ struct ListMountPoints {
     mount_points: Vec<String>,
 }
 
-impl TryFromNoun<&Noun> for ListMountPoints {
+impl TryFrom<&Noun> for ListMountPoints {
+    type Error = convert::Error;
+
     /// Attempts to create a [`ListMountPoints`] request from the tail of a noun that was tagged
     /// with `%hill`, where `%hill` is a poor choice of tag name for a "list mount points" request.
     ///
@@ -112,7 +116,7 @@ impl TryFromNoun<&Noun> for ListMountPoints {
     ///       / \
     ///      mp  0
     /// ```
-    fn try_from_noun(data: &Noun) -> Result<Self, convert::Error> {
+    fn try_from(data: &Noun) -> Result<Self, Self::Error> {
         let mut mount_points = Vec::new();
         if let Noun::Cell(data) = data {
             let data = data.to_vec();
@@ -177,7 +181,7 @@ macro_rules! impl_driver {
             ) -> JoinHandle<Status> {
                 let task = tokio::spawn(async move {
                     while let Some(req) = input_rx.recv().await {
-                        match Request::try_from_noun(req) {
+                        match Request::try_from(req) {
                             Ok(Request::UpdateFileSystem(req)) => self.update_file_system(req),
                             Ok(Request::CommitMountPoint(req)) => self.commit_mount_point(req),
                             Ok(Request::DeleteMountPoint(req)) => self.delete_mount_point(req),
@@ -219,12 +223,51 @@ impl Nounish for Knot<Atom> {}
 
 impl Nounish for Knot<&Atom> {}
 
+/// Attempts to create a [`Knot`] from a [`PathComponent`].
+impl TryFrom<PathComponent> for Knot<Atom> {
+    type Error = ();
+
+    fn try_from(path_component: PathComponent) -> Result<Self, Self::Error> {
+        // This is unlikely to ever occur because a [`PathComponent`] should only ever be created
+        // using [`TryFromNoun<Knot<&Atom>>`], but we check when compiling in debug mode just to be
+        // safe.
+        #[cfg(debug_assertions)]
+        if path_component.0.contains(path::MAIN_SEPARATOR) {
+            return Err(());
+        }
+
+        let knot = if path_component.0.chars().nth(0) == Some('!') {
+            &path_component.0[1..]
+        } else {
+            &path_component.0[..]
+        };
+        Ok(Knot(Atom::from(knot)))
+    }
+}
+
 /// A list of `$knot`.
 struct KnotList<C: Cellish>(C);
 
 impl Nounish for KnotList<Cell> {}
 
 impl Nounish for KnotList<&Cell> {}
+
+/// Attempts to create a [`KnotList`] from a [`Path`].
+impl TryFrom<Path> for KnotList<Cell> {
+    type Error = ();
+
+    fn try_from(path: Path) -> Result<Self, Self::Error> {
+        let mut path_components = Vec::new();
+        for path_component in path.0.components() {
+            let path_component =
+                PathComponent(path_component.as_os_str().to_str().ok_or(())?.to_string());
+            let knot = Knot::try_from(path_component)?;
+            path_components.push(knot.0.into_rc_noun());
+        }
+        // TODO: determine if `Atom::null()` should be pushed onto `path_components`.
+        Ok(KnotList(Cell::from(path_components)))
+    }
+}
 
 /// A component of a file system path.
 struct PathComponent(String);
@@ -237,8 +280,10 @@ impl AsRef<path::Path> for PathComponent {
 }
 
 /// Attempts to create a [`PathComponent`] from an [`Knot`].
-impl TryFromNoun<Knot<&Atom>> for PathComponent {
-    fn try_from_noun(knot: Knot<&Atom>) -> Result<Self, convert::Error> {
+impl TryFrom<Knot<&Atom>> for PathComponent {
+    type Error = convert::Error;
+
+    fn try_from(knot: Knot<&Atom>) -> Result<Self, Self::Error> {
         let knot = atom_as_str(knot.0)?;
         // A path component should not have a path separator in it.
         if knot.contains(path::MAIN_SEPARATOR) {
@@ -256,62 +301,25 @@ impl TryFromNoun<Knot<&Atom>> for PathComponent {
     }
 }
 
-/// Attempts to create a [`Knot`] from a [`PathComponent`].
-impl TryIntoNoun<Knot<Atom>> for PathComponent {
-    type Error = ();
-
-    fn try_into_noun(self) -> Result<Knot<Atom>, Self::Error> {
-        // This is unlikely to ever occur because a [`PathComponent`] should only ever be created
-        // using [`TryFromNoun<Knot<&Atom>>`], but we check when compiling in debug mode just to be
-        // safe.
-        #[cfg(debug_assertions)]
-        if self.0.contains(path::MAIN_SEPARATOR) {
-            return Err(());
-        }
-
-        let knot = if self.0.chars().nth(0) == Some('!') {
-            &self.0[1..]
-        } else {
-            &self.0[..]
-        };
-        Ok(Knot(Atom::from(knot)))
-    }
-}
-
 /// A file system path.
 struct Path(PathBuf);
 
 /// Attempts to create a [`Path`] from a [`KnotList`].
-impl TryFromNoun<KnotList<&Cell>> for Path {
-    fn try_from_noun(knot_list: KnotList<&Cell>) -> Result<Self, convert::Error> {
+impl TryFrom<KnotList<&Cell>> for Path {
+    type Error = convert::Error;
+
+    fn try_from(knot_list: KnotList<&Cell>) -> Result<Self, Self::Error> {
         let mut path = PathBuf::new();
         // TODO: determine if is `knot_list` null-terminated.
         for knot in knot_list.0.to_vec() {
             if let Noun::Atom(knot) = &*knot {
-                let path_component = PathComponent::try_from_noun(Knot(knot))?;
+                let path_component = PathComponent::try_from(Knot(knot))?;
                 path.push(path_component);
             } else {
                 return Err(convert::Error::UnexpectedCell);
             }
         }
         Ok(Self(path))
-    }
-}
-
-/// Attempts to create a [`KnotList`] from a [`Path`].
-impl TryIntoNoun<KnotList<Cell>> for Path {
-    type Error = ();
-
-    fn try_into_noun(self) -> Result<KnotList<Cell>, Self::Error> {
-        let mut path_components = Vec::new();
-        for path_component in self.0.components() {
-            let path_component =
-                PathComponent(path_component.as_os_str().to_str().ok_or(())?.to_string());
-            let knot = path_component.try_into_noun()?;
-            path_components.push(knot.0.into_rc_noun());
-        }
-        // TODO: determine if `Atom::null()` should be pushed onto `path_components`.
-        Ok(KnotList(Cell::from(path_components)))
     }
 }
 
@@ -323,58 +331,58 @@ mod tests {
     use super::*;
 
     #[test]
-    fn try_from_knot() -> Result<(), convert::Error> {
+    fn convert_knot() {
         macro_rules! test {
-            // Expect success.
+            // `Knot` -> `PathComponent`: expect success.
             (knot: $knot:literal, path_component: $path_component:literal) => {
                 let atom = Atom::from($knot);
                 let knot = Knot(&atom);
-                let path_component = PathComponent::try_from_noun(knot)?;
+                let path_component =
+                    PathComponent::try_from(knot).expect("path component from knot");
                 assert_eq!(path_component.0, $path_component);
             };
-            // Expect failure.
+            // `Knot` -> `PathComponent`: expect failure.
             (knot: $knot:expr) => {
                 let atom = Atom::from($knot);
                 let knot = Knot(&atom);
-                assert!(PathComponent::try_from_noun(knot).is_err());
+                assert!(PathComponent::try_from(knot).is_err());
             };
-        }
-
-        test!(knot: "hello", path_component: "hello");
-        test!(knot: "wow this is a long component", path_component: "wow this is a long component");
-        test!(knot: "", path_component: "!");
-        test!(knot: ".", path_component: "!.");
-        test!(knot: "..", path_component: "!..");
-        test!(knot: "!bu4hao3yi4si", path_component: "!!bu4hao3yi4si");
-        test!(knot: format!("{}at-the-beginning", path::MAIN_SEPARATOR));
-        test!(knot: format!("at-the-end{}", path::MAIN_SEPARATOR));
-        test!(knot: format!("in{}between", path::MAIN_SEPARATOR));
-
-        Ok(())
-    }
-
-    #[test]
-    fn try_into_knot() -> Result<(), ()> {
-        macro_rules! test {
-            // Expect success.
+            // `PathComponent` -> `Knot`: expect success.
             (path_component: $path_component:literal, knot: $knot:literal) => {
                 let path_component = PathComponent($path_component.to_string());
-                let knot = path_component.try_into_noun()?;
+                let knot = Knot::try_from(path_component).expect("knot from path component");
                 assert_eq!(knot.0, $knot);
             };
-            // Expect failure.
+            // `PathComponent` -> `Knot`: expect failure.
             (path_component: $path_component:expr) => {
                 let path_component = PathComponent($path_component.to_string());
-                assert!(path_component.try_into_noun().is_err());
+                assert!(Knot::try_from(path_component).is_err());
             };
         }
 
-        test!(path_component: "goodbye", knot: "goodbye");
-        test!(path_component: "a_little_longer", knot: "a_little_longer");
-        test!(path_component: "!", knot: "");
-        test!(path_component: "!.", knot: ".");
-        test!(path_component: "!..", knot: "..");
-        test!(path_component: "!!double-down", knot: "!double-down");
+        {
+            test!(knot: "hello", path_component: "hello");
+            test!(knot: "wow this is a long component", path_component: "wow this is a long component");
+            test!(knot: "", path_component: "!");
+            test!(knot: ".", path_component: "!.");
+            test!(knot: "..", path_component: "!..");
+            test!(knot: "!bu4hao3yi4si", path_component: "!!bu4hao3yi4si");
+        }
+
+        {
+            test!(knot: format!("{}at-the-beginning", path::MAIN_SEPARATOR));
+            test!(knot: format!("at-the-end{}", path::MAIN_SEPARATOR));
+            test!(knot: format!("in{}between", path::MAIN_SEPARATOR));
+        }
+
+        {
+            test!(path_component: "goodbye", knot: "goodbye");
+            test!(path_component: "a_little_longer", knot: "a_little_longer");
+            test!(path_component: "!", knot: "");
+            test!(path_component: "!.", knot: ".");
+            test!(path_component: "!..", knot: "..");
+            test!(path_component: "!!double-down", knot: "!double-down");
+        }
 
         #[cfg(debug_assertions)]
         {
@@ -390,64 +398,62 @@ mod tests {
                     )
             );
         }
-
-        Ok(())
     }
 
     #[test]
-    fn try_from_knot_list() -> Result<(), convert::Error> {
+    fn convert_knot_list() {
         macro_rules! test {
-            // Expect success.
+            // `KnotList` -> `Path`: expect success.
             (knot_list: $knot_list:expr, path: $path:literal) => {
                 let cell = Cell::from($knot_list);
                 let knot_list = KnotList(&cell);
-                let path = Path::try_from_noun(knot_list)?;
+                let path = Path::try_from(knot_list).expect("path from knot list");
                 assert_eq!(path.0, path::Path::new($path));
             };
-            // Expect failure.
+            // `KnotList` -> `Path`: expect failure.
             (knot_list: $knot_list:expr) => {
                 let cell = Cell::from($knot_list);
                 let knot_list = KnotList(&cell);
-                assert!(Path::try_from_noun(knot_list).is_err());
+                assert!(Path::try_from(knot_list).is_err());
             };
-        }
-
-        test!(knot_list: ["hello", "goodbye"], path: "hello/goodbye");
-        test!(knot_list: ["some", ".", "path"], path: "some/!./path");
-        test!(knot_list: ["..", "!", "", "jian3", "fei2"], path: "!../!!/!/jian3/fei2");
-        test!(knot_list: [&format!("{}uh-oh", path::MAIN_SEPARATOR), "gan4ma2"]);
-
-        Ok(())
-    }
-
-    #[test]
-    fn try_into_knot_list() -> Result<(), ()> {
-        macro_rules! test {
-            // Expect success.
+            // `Path` -> `KnotList`: expect success.
             (path: $path:literal, knot_list: $knot_list:expr) => {
                 let path = Path(PathBuf::from($path));
-                let knot_list = path.try_into_noun()?;
+                let knot_list = KnotList::try_from(path).expect("knot list from path");
                 assert_eq!(knot_list.0, Cell::from($knot_list))
             };
-            // Expect failure.
+            // `Path` -> `KnotList`: expect failure.
             (path: $path:expr) => {
                 let path = Path(PathBuf::from($path));
-                assert!(path.try_into_noun().is_err());
+                assert!(KnotList::try_from(path).is_err());
             };
         }
 
-        test!(path: "la/dee/da", knot_list: ["la", "dee", "da"]);
-        test!(path: "some/!!escaped/path", knot_list: ["some", "!escaped", "path"]);
-        test!(path: "!./!../!/more/components", knot_list: [".", "..", "", "more", "components"]);
-        test!(
-            path: format!(
-                "{}the{}usual{}",
-                path::MAIN_SEPARATOR,
-                path::MAIN_SEPARATOR,
-                path::MAIN_SEPARATOR
-            )
-        );
+        {
+            test!(knot_list: ["hello", "goodbye"], path: "hello/goodbye");
+            test!(knot_list: ["some", ".", "path"], path: "some/!./path");
+            test!(knot_list: ["..", "!", "", "jian3", "fei2"], path: "!../!!/!/jian3/fei2");
+        }
 
-        Ok(())
+        {
+            test!(knot_list: [&format!("{}uh-oh", path::MAIN_SEPARATOR), "gan4ma2"]);
+        }
+
+        {
+            test!(path: "la/dee/da", knot_list: ["la", "dee", "da"]);
+            test!(path: "some/!!escaped/path", knot_list: ["some", "!escaped", "path"]);
+            test!(path: "!./!../!/more/components", knot_list: [".", "..", "", "more", "components"]);
+        }
+
+        {
+            test!(
+                path: format!(
+                    "{}the{}usual{}",
+                    path::MAIN_SEPARATOR,
+                    path::MAIN_SEPARATOR,
+                    path::MAIN_SEPARATOR
+                )
+            );
+        }
     }
 }
