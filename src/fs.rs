@@ -321,12 +321,11 @@ impl TryFrom<KnotList<&Cell>> for Path {
 }
 
 /// A file system mount point.
+///
+/// All mount points reside within the root directory of a ship (i.e. the pier directory).
 struct MountPoint {
     /// The name of the mount point.
     name: PathComponent,
-
-    /// The mount point's parent directory. `None` if the mount point is the root directory.
-    parent_dir: Option<Path>,
 }
 
 impl MountPoint {
