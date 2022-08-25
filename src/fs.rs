@@ -5,7 +5,7 @@ use noun::{
     cell::Cell,
     convert,
     marker::{Atomish, Cellish, Nounish},
-    Noun,
+    Noun, Rc,
 };
 use std::{
     collections::HashMap,
@@ -262,7 +262,7 @@ impl TryFrom<Path> for KnotList<Cell> {
             let path_component =
                 PathComponent(path_component.as_os_str().to_str().ok_or(())?.to_string());
             let knot = Knot::try_from(path_component)?;
-            path_components.push(knot.0.into_rc_noun());
+            path_components.push(Rc::<Noun>::from(knot.0));
         }
         // TODO: determine if `Atom::null()` should be pushed onto `path_components`.
         Ok(KnotList(Cell::from(path_components)))

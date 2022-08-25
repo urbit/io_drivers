@@ -8,7 +8,7 @@ use hyper::{
 };
 use hyper_rustls::{ConfigBuilderExt, HttpsConnector, HttpsConnectorBuilder};
 use log::{debug, info, warn};
-use noun::{atom, atom::Atom, cell, cell::Cell, convert, Noun};
+use noun::{atom, atom::Atom, cell, convert, Noun, Rc};
 use rustls::ClientConfig;
 use std::collections::HashMap;
 use tokio::{
@@ -364,20 +364,22 @@ impl TryFrom<HyperResponse> for Noun {
     type Error = header::ToStrError;
 
     fn try_from(resp: HyperResponse) -> Result<Self, Self::Error> {
-        let req_num = atom!(resp.req_num).into_rc_noun();
-        let status = atom!(resp.parts.status.as_u16()).into_rc_noun();
-        let null = Atom::null().into_rc_noun();
+        let req_num = Rc::<Noun>::from(atom!(resp.req_num));
+        let status = Rc::<Noun>::from(atom!(resp.parts.status.as_u16()));
+        let null = Rc::<Noun>::from(Atom::null());
 
         let headers = {
             let mut headers_cell = null.clone();
             let headers = &resp.parts.headers;
             for key in headers.keys().map(|k| k.as_str()) {
                 let vals = headers.get_all(key);
-                let key = atom!(key).into_rc_noun();
+                let key = Rc::<Noun>::from(atom!(key));
                 for val in vals {
-                    let val = atom!(val.to_str()?).into_rc_noun();
-                    headers_cell =
-                        cell![cell![key.clone(), val].into_rc_noun(), headers_cell].into_rc_noun();
+                    let val = Rc::<Noun>::from(atom!(val.to_str()?));
+                    headers_cell = Rc::<Noun>::from(cell![
+                        Rc::<Noun>::from(cell![key.clone(), val]),
+                        headers_cell
+                    ]);
                 }
             }
             headers_cell
@@ -390,7 +392,7 @@ impl TryFrom<HyperResponse> for Noun {
             } else {
                 let body_len = atom!(body.len());
                 let body = atom!(body);
-                cell![null, cell![body_len, body].into_rc_noun()].into_rc_noun()
+                Rc::<Noun>::from(cell![null, Rc::<Noun>::from(cell![body_len, body])])
             }
         };
 
