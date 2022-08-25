@@ -336,33 +336,24 @@ impl MountPoint {
 }
 
 /// A file system entry monitored by the driver.
-enum Entry<'a> {
-    Directory(Directory<'a>),
-    File(File<'a>),
+enum Entry {
+    Directory(Directory),
+    File(File),
 }
 
 /// A directory monitored by the driver.
-struct Directory<'a> {
+struct Directory {
     /// The name of the directory.
     name: PathComponent,
 
-    /// The mount point that the directory lies under.
-    mount_point: &'a MountPoint,
-
-    /// The directory's parent directory. `None` if the parent directory is a mount point.
-    parent_dir: Option<&'a Directory<'a>>,
-
     /// The files and directories within the directory.
-    children: HashMap<PathComponent, Entry<'a>>,
+    children: HashMap<PathComponent, Entry>,
 }
 
 /// A file monitored by the driver.
-struct File<'a> {
+struct File {
     /// The name of the file.
     name: PathComponent,
-
-    /// The file's parent directory.
-    parent_dir: Directory<'a>,
 }
 
 #[cfg(test)]
