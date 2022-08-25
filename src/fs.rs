@@ -58,6 +58,16 @@ struct UpdateFileSystem {
 }
 
 impl TryFromNoun<&Noun> for UpdateFileSystem {
+    /// Attempts to create a [`UpdateFileSystem`] request from the tail of a noun that was tagged
+    /// with `%ergo`, where `%ergo` is a poor choice of tag name for an "update file system"
+    /// request.
+    ///
+    /// A properly structured noun is TODO.
+    /// ```text
+    ///   .
+    ///  / \
+    /// mp  TODO
+    /// ```
     fn try_from_noun(data: &Noun) -> Result<Self, convert::Error> {
         if let Noun::Cell(data) = &*data {
             if let Noun::Atom(mount_point) = &*data.head() {
@@ -89,9 +99,9 @@ struct ListMountPoints {
 
 impl TryFromNoun<&Noun> for ListMountPoints {
     /// Attempts to create a [`ListMountPoints`] request from the tail of a noun that was tagged
-    /// with `%hill`.
+    /// with `%hill`, where `%hill` is a poor choice of tag name for a "list mount points" request.
     ///
-    /// A properly formatted noun is a null-terminated list of mount points, each of which is an
+    /// A properly structured noun is a null-terminated list of mount points, each of which is an
     /// atom. For example:
     /// ```text
     ///    .
