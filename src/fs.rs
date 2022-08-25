@@ -9,6 +9,7 @@ use noun::{
 };
 use std::{
     collections::HashMap,
+    ffi::OsStr,
     fs,
     path::{self, Path, PathBuf},
 };
@@ -233,7 +234,7 @@ pub extern "C" fn file_system_run() -> Status {
 }
 
 //==================================================================================================
-// Miscellaneous
+// Path Manipulation
 //==================================================================================================
 
 /// A `$knot`.
@@ -284,6 +285,8 @@ impl TryFrom<&Path> for KnotList<Cell> {
 }
 
 /// A component of a file system path.
+///
+/// A [`PathComponent`] is guaranteed to never be `.` or `..`.
 struct PathComponent(String);
 
 /// Enables a [`PathComponent`] to be pushed onto a [`std::path::Path`] or [`std::path::PathBuf`].
@@ -312,6 +315,18 @@ impl TryFrom<Knot<&Atom>> for PathComponent {
                 knot.to_string()
             };
         Ok(Self(path_component))
+    }
+}
+
+/// Attempts to create a [`PathComponent`] from an [`&OsStr`].
+impl TryFrom<&OsStr> for PathComponent {
+    type Error = ();
+
+    fn try_from(os_str: &OsStr) -> Result<Self, Self::Error> {
+        match os_str.to_str() {
+            Some(".") | Some("..") | None => Err(()),
+            Some(string) => Ok(Self(string.to_string())),
+        }
     }
 }
 
