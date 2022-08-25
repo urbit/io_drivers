@@ -88,20 +88,34 @@ struct ListMountPoints {
 }
 
 impl TryFromNoun<&Noun> for ListMountPoints {
+    /// Attempts to create a [`ListMountPoints`] request from the tail of a noun that was tagged
+    /// with `%hill`.
+    ///
+    /// A properly formatted noun is a null-terminated list of mount points, each of which is an
+    /// atom. For example:
+    /// ```text
+    ///    .
+    ///   / \
+    /// mp   .
+    ///     / \
+    ///    mp  .
+    ///       / \
+    ///      mp  0
+    /// ```
     fn try_from_noun(data: &Noun) -> Result<Self, convert::Error> {
-        if let Noun::Cell(data) = &*data {
-            let mut mount_points = Vec::new();
-            for mount_point in data.to_vec() {
-                if let Noun::Atom(mount_point) = &*mount_point {
+        let mut mount_points = Vec::new();
+        if let Noun::Cell(data) = data {
+            let data = data.to_vec();
+            // Skip the null terminator at the end of the list.
+            for mount_point in &data[0..data.len() - 1] {
+                if let Noun::Atom(mount_point) = &**mount_point {
                     mount_points.push(atom_as_str(mount_point)?.to_string());
                 } else {
                     return Err(convert::Error::UnexpectedCell);
                 }
             }
-            Ok(Self { mount_points })
-        } else {
-            Err(convert::Error::UnexpectedAtom)
         }
+        Ok(Self { mount_points })
     }
 }
 
