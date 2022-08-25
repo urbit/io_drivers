@@ -158,10 +158,9 @@ impl FileSystem {
     fn scan_mount_points(&mut self, req: ScanMountPoints) {
         for key in req.mount_points {
             if !self.mount_points.contains_key(&key) {
-                let mount_point = MountPoint::new(&key[..]);
-                self.mount_points.insert(key.clone(), mount_point);
+                let mount_point = MountPoint::new(PathComponent(key.clone()));
+                self.mount_points.insert(key, mount_point);
             }
-            let mount_point = self.mount_points.get(&key).unwrap();
         }
     }
 }
@@ -332,7 +331,7 @@ struct MountPoint {
 
 impl MountPoint {
     /// Creates a new mount point.
-    fn new(name: &str) -> Self {
+    fn new(name: PathComponent) -> Self {
         todo!()
     }
 }
