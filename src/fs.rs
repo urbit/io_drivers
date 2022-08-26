@@ -386,6 +386,7 @@ impl TryFrom<&OsStr> for PathComponent {
 
     fn try_from(os_str: &OsStr) -> Result<Self, Self::Error> {
         match os_str.to_str() {
+            // TODO: escape with `!` if `os_str` is ``, `.`, or `..`.
             Some(".") | Some("..") | None => Err(()),
             Some(string) => Ok(Self(string.to_string())),
         }
