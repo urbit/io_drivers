@@ -397,21 +397,21 @@ fn read_dir(path: &Path) -> io::Result<HashMap<PathComponent, Entry>> {
     let mut entries = HashMap::new();
     for entry in fs::read_dir(path)? {
         let path = entry?.path();
-        if let Some(name) = path.file_name() {
-            if let Ok(name) = PathComponent::try_from(name) {
+        if let Some(entry_name) = path.file_name() {
+            if let Ok(entry_name) = PathComponent::try_from(entry_name) {
                 let entry = if path.is_dir() {
                     Entry::Directory(Directory {
-                        name: name.clone(),
+                        path,
                         children: HashMap::new(),
                     })
                 } else if path.is_file() {
-                    Entry::File(File { name: name.clone() })
+                    Entry::File(File { path })
                 } else if path.is_symlink() {
                     todo!()
                 } else {
                     continue;
                 };
-                entries.insert(name, entry);
+                entries.insert(entry_name, entry);
             }
         }
     }
@@ -465,8 +465,8 @@ enum Entry {
 
 /// A directory monitored by the driver.
 struct Directory {
-    /// The name of the directory.
-    name: PathComponent,
+    /// The path to the directory.
+    path: PathBuf,
 
     /// The files and directories within the directory.
     children: HashMap<PathComponent, Entry>,
@@ -474,8 +474,8 @@ struct Directory {
 
 /// A file monitored by the driver.
 struct File {
-    /// The name of the file.
-    name: PathComponent,
+    /// The path to the file.
+    path: PathBuf,
 }
 
 #[cfg(test)]
