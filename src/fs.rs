@@ -56,6 +56,7 @@ impl TryFrom<Noun> for Request {
 
 /// A request to update the file system.
 struct UpdateFileSystem {
+    /// The mount point to update.
     mount_point: String,
 }
 
@@ -93,7 +94,23 @@ impl TryFrom<&Noun> for UpdateFileSystem {
 struct CommitMountPoint {}
 
 /// A request to delete a mount point.
-struct DeleteMountPoint {}
+struct DeleteMountPoint {
+    /// The mount point to delete.
+    mount_point: PathComponent,
+}
+
+impl TryFrom<&Noun> for DeleteMountPoint {
+    type Error = convert::Error;
+
+    fn try_from(data: &Noun) -> Result<Self, Self::Error> {
+        if let Noun::Atom(knot) = &*data {
+            let mount_point = PathComponent::try_from(Knot(knot))?;
+            Ok(Self { mount_point })
+        } else {
+            Err(convert::Error::UnexpectedCell)
+        }
+    }
+}
 
 /// A request to scan a list of mount points.
 struct ScanMountPoints {
