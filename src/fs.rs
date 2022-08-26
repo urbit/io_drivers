@@ -183,8 +183,16 @@ impl FileSystem {
         todo!()
     }
 
-    fn commit_mount_point(&self, _req: CommitMountPoint) {
-        todo!()
+    fn commit_mount_point(&self, req: CommitMountPoint) {
+        if let Some(mount_point) = self.mount_points.get(&req.mount_point) {
+            todo!()
+        } else {
+            warn!(
+                target: Self::name(),
+                "failed to commit mount point %{} because it's not in the active set of mount points",
+                req.mount_point
+            );
+        }
     }
 
     fn delete_mount_point(&mut self, req: DeleteMountPoint) {
@@ -199,7 +207,8 @@ impl FileSystem {
         } else {
             warn!(
                 target: Self::name(),
-                "mount point %{} is not in the active set of mount points", req.mount_point
+                "failed to delete mount point %{} because it's not in the active set of mount points",
+                req.mount_point
             );
         }
     }
