@@ -10,8 +10,7 @@ use noun::{
 use std::{
     collections::HashMap,
     ffi::OsStr,
-    fmt,
-    fs,
+    fmt, fs,
     path::{self, Path, PathBuf},
 };
 use tokio::{
@@ -415,7 +414,7 @@ struct MountPoint {
     name: PathComponent,
 
     /// The topmost files and directories within the mount point.
-    children: HashMap<PathComponent, Entry>,
+    children: Option<HashMap<PathComponent, Entry>>,
 }
 
 impl MountPoint {
@@ -423,16 +422,23 @@ impl MountPoint {
     fn new(name: PathComponent, parent_dir: &mut PathBuf) -> io::Result<Self> {
         let path = parent_dir;
         path.push(&name);
-        match read_dir(path) {
-            Ok(children) => {
-                path.pop();
-                Ok(Self { name, children })
-            }
-            Err(err) => {
-                path.pop();
-                Err(err)
-            }
-        }
+        let res = if path.is_dir() {
+            Ok(Self {
+                name,
+                children: None,
+            })
+        } else if path.is_file() {
+            todo!()
+        } else if path.is_symlink() {
+            todo!()
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                format!("cannot determine file type of {}", name),
+            ))
+        };
+        path.pop();
+        res
     }
 }
 
