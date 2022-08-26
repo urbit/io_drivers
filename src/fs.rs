@@ -195,16 +195,17 @@ impl FileSystem {
     }
 
     fn scan_mount_points(&mut self, req: ScanMountPoints) {
-        for mount_point_name in req.mount_points {
-            if !self.mount_points.contains_key(&mount_point_name) {
-                match MountPoint::new(mount_point_name.clone(), &mut self.root_dir) {
+        for name in req.mount_points {
+            if !self.mount_points.contains_key(&name) {
+                let path = self.root_dir.join(&name);
+                match MountPoint::new(path) {
                     Ok(mount_point) => {
-                        self.mount_points.insert(mount_point_name, mount_point);
+                        self.mount_points.insert(name, mount_point);
                     }
                     Err(err) => {
                         warn!(
                             target: Self::name(),
-                            "failed to scan %{} mount point: {}", mount_point_name, err
+                            "failed to scan %{} mount point: {}", name, err
                         );
                     }
                 }
@@ -424,8 +425,8 @@ fn read_dir(path: &Path) -> io::Result<HashMap<PathComponent, Entry>> {
 ///
 /// All mount points reside within the root directory of a ship (i.e. the pier directory).
 struct MountPoint {
-    /// The name of the mount point.
-    name: PathComponent,
+    /// The path to the mount point.
+    path: PathBuf,
 
     /// The topmost files and directories within the mount point.
     children: Option<HashMap<PathComponent, Entry>>,
@@ -433,17 +434,15 @@ struct MountPoint {
 
 impl MountPoint {
     /// Creates a new mount point.
-    fn new(name: PathComponent, parent_dir: &mut PathBuf) -> io::Result<Self> {
-        let path = parent_dir;
-        path.push(&name);
-        let res = if path.is_dir() {
+    fn new(path: PathBuf) -> io::Result<Self> {
+        if path.is_dir() {
             Ok(Self {
-                name,
+                path,
                 children: Some(HashMap::new()),
             })
         } else if path.is_file() {
             Ok(Self {
-                name,
+                path,
                 children: None,
             })
         } else if path.is_symlink() {
@@ -451,11 +450,9 @@ impl MountPoint {
         } else {
             Err(io::Error::new(
                 io::ErrorKind::Unsupported,
-                format!("cannot determine file type of {}", name),
+                format!("cannot determine file type of {}", path.display()),
             ))
-        };
-        path.pop();
-        res
+        }
     }
 }
 
