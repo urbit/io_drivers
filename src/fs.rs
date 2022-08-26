@@ -178,11 +178,13 @@ impl FileSystem {
     }
 
     fn delete_mount_point(&mut self, req: DeleteMountPoint) {
-        // TODO: explain how implicit `drop()` calls delete the mount point.
-        if let Some(_mount_point) = self.mount_points.remove(&req.mount_point) {
+        if let Some(mount_point) = self.mount_points.remove(&req.mount_point) {
+            // Dropping a mount point deletes all of its children (files and directories) but does
+            // not delete the mount point itself from the file system.
+            drop(mount_point);
             info!(
                 target: Self::name(),
-                "deleting mount point %{}", req.mount_point
+                "deleted mount point %{}", req.mount_point
             );
         } else {
             warn!(
