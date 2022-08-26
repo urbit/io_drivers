@@ -472,10 +472,50 @@ struct Directory {
     children: HashMap<PathComponent, Entry>,
 }
 
+impl Drop for Directory {
+    /// Deletes a directory and all its children from the file system.
+    fn drop(&mut self) {
+        if let Err(err) = fs::remove_dir_all(&self.path) {
+            warn!(
+                target: FileSystem::name(),
+                "failed to recursively delete directory {}: {}",
+                self.path.display(),
+                err
+            );
+        } else {
+            debug!(
+                target: FileSystem::name(),
+                "recursively deleted directory {}",
+                self.path.display()
+            );
+        }
+    }
+}
+
 /// A file monitored by the driver.
 struct File {
     /// The path to the file.
     path: PathBuf,
+}
+
+impl Drop for File {
+    /// Deletes a file from the file system.
+    fn drop(&mut self) {
+        if let Err(err) = fs::remove_file(&self.path) {
+            warn!(
+                target: FileSystem::name(),
+                "failed to delete file {}: {}",
+                self.path.display(),
+                err
+            );
+        } else {
+            debug!(
+                target: FileSystem::name(),
+                "deleted file {}",
+                self.path.display()
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -606,6 +646,42 @@ mod tests {
                     path::MAIN_SEPARATOR
                 )
             );
+        }
+    }
+
+    #[test]
+    fn drop_file() {
+        {
+            let path = Path::new("/tmp/what-are-the-odds-this-already-exists.txt");
+            assert!(fs::File::create(path).is_ok());
+            let file = File {
+                path: path.to_path_buf(),
+            };
+            drop(file);
+            let res = fs::File::open(path);
+            assert!(res.is_err());
+            assert_eq!(res.unwrap_err().kind(), io::ErrorKind::NotFound);
+        }
+    }
+
+    #[test]
+    fn drop_dir() {
+        {
+            let dir_path = Path::new("/tmp/no-way-this-already-exists");
+            let file_path = dir_path.join("some-ridiculous-file-name.txt");
+            assert!(fs::create_dir(dir_path).is_ok());
+            assert!(fs::File::create(&file_path).is_ok());
+            let dir = Directory {
+                path: dir_path.to_path_buf(),
+                children: HashMap::from([(
+                    PathComponent(file_path.file_name().unwrap().to_str().unwrap().to_string()),
+                    Entry::File(File { path: file_path }),
+                )]),
+            };
+            drop(dir);
+            let res = fs::read_dir(dir_path);
+            assert!(res.is_err());
+            assert_eq!(res.unwrap_err().kind(), io::ErrorKind::NotFound);
         }
     }
 }
