@@ -99,12 +99,9 @@ impl TryFrom<&Noun> for CommitMountPoint {
     type Error = convert::Error;
 
     fn try_from(data: &Noun) -> Result<Self, Self::Error> {
-        if let Noun::Atom(knot) = &*data {
-            let mount_point = PathComponent::try_from(Knot(knot))?;
-            Ok(Self { mount_point })
-        } else {
-            Err(convert::Error::UnexpectedCell)
-        }
+        Ok(Self {
+            mount_point: PathComponent::try_from(data)?,
+        })
     }
 }
 
@@ -118,12 +115,9 @@ impl TryFrom<&Noun> for DeleteMountPoint {
     type Error = convert::Error;
 
     fn try_from(data: &Noun) -> Result<Self, Self::Error> {
-        if let Noun::Atom(knot) = &*data {
-            let mount_point = PathComponent::try_from(Knot(knot))?;
-            Ok(Self { mount_point })
-        } else {
-            Err(convert::Error::UnexpectedCell)
-        }
+        Ok(Self {
+            mount_point: PathComponent::try_from(data)?,
+        })
     }
 }
 
@@ -350,7 +344,7 @@ impl fmt::Display for PathComponent {
     }
 }
 
-/// Attempts to create a [`PathComponent`] from an [`Knot`].
+/// Attempts to create a [`PathComponent`] from a [`Knot`].
 impl TryFrom<Knot<&Atom>> for PathComponent {
     type Error = convert::Error;
 
@@ -369,6 +363,19 @@ impl TryFrom<Knot<&Atom>> for PathComponent {
                 knot.to_string()
             };
         Ok(Self(path_component))
+    }
+}
+
+/// Attempts to create a [`PathComponent`] from a [`&Noun`].
+impl TryFrom<&Noun> for PathComponent {
+    type Error = convert::Error;
+
+    fn try_from(noun: &Noun) -> Result<Self, Self::Error> {
+        if let Noun::Atom(atom) = noun {
+            Self::try_from(Knot(atom))
+        } else {
+            Err(convert::Error::UnexpectedCell)
+        }
     }
 }
 
