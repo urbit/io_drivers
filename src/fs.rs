@@ -41,8 +41,9 @@ impl TryFrom<Noun> for Request {
                 // These tag names are terrible, but we unfortunatley can't do anything about
                 // it here because they're determined by the kernel.
                 match atom_as_str(tag)? {
-                    // Update the file system.
                     "ergo" => Ok(Self::UpdateFileSystem(UpdateFileSystem::try_from(&*data)?)),
+                    "hill" => Ok(Self::ScanMountPoints(ScanMountPoints::try_from(&*data)?)),
+                    "ogre" => Ok(Self::DeleteMountPoint(DeleteMountPoint::try_from(&*data)?)),
                     _ => todo!(),
                 }
             } else {
