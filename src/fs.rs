@@ -10,6 +10,7 @@ use noun::{
 use std::{
     collections::HashMap,
     ffi::OsStr,
+    fmt,
     fs,
     path::{self, Path, PathBuf},
 };
@@ -57,7 +58,7 @@ impl TryFrom<Noun> for Request {
 /// A request to update the file system.
 struct UpdateFileSystem {
     /// The mount point to update.
-    mount_point: String,
+    mount_point: PathComponent,
 }
 
 impl TryFrom<&Noun> for UpdateFileSystem {
@@ -75,12 +76,11 @@ impl TryFrom<&Noun> for UpdateFileSystem {
     /// ```
     fn try_from(data: &Noun) -> Result<Self, Self::Error> {
         if let Noun::Cell(data) = &*data {
-            if let Noun::Atom(mount_point) = &*data.head() {
+            if let Noun::Atom(knot) = &*data.head() {
+                let mount_point = PathComponent::try_from(Knot(knot))?;
                 // data.tail() is `can`, which is a null-terminated list of pairs
                 // each pair appears to [<path within mount point> <file type>]
-                Ok(Self {
-                    mount_point: atom_as_str(mount_point)?.to_string(),
-                })
+                Ok(Self { mount_point })
             } else {
                 Err(convert::Error::UnexpectedCell)
             }
@@ -115,7 +115,7 @@ impl TryFrom<&Noun> for DeleteMountPoint {
 /// A request to scan a list of mount points.
 struct ScanMountPoints {
     /// The names of the mount points to scan.
-    mount_points: Vec<String>,
+    mount_points: Vec<PathComponent>,
 }
 
 impl TryFrom<&Noun> for ScanMountPoints {
@@ -140,9 +140,10 @@ impl TryFrom<&Noun> for ScanMountPoints {
         if let Noun::Cell(data) = data {
             let data = data.to_vec();
             // Skip the null terminator at the end of the list.
-            for mount_point in &data[0..data.len() - 1] {
-                if let Noun::Atom(mount_point) = &**mount_point {
-                    mount_points.push(atom_as_str(mount_point)?.to_string());
+            for knot in &data[0..data.len() - 1] {
+                if let Noun::Atom(knot) = &**knot {
+                    let mount_point = PathComponent::try_from(Knot(knot))?;
+                    mount_points.push(mount_point);
                 } else {
                     return Err(convert::Error::UnexpectedCell);
                 }
@@ -164,7 +165,7 @@ pub struct FileSystem {
     root_dir: PathBuf,
 
     /// A map from mount point name to mount point.
-    mount_points: HashMap<String, MountPoint>,
+    mount_points: HashMap<PathComponent, MountPoint>,
 }
 
 impl FileSystem {
@@ -181,16 +182,16 @@ impl FileSystem {
     }
 
     fn scan_mount_points(&mut self, req: ScanMountPoints) {
-        for name in req.mount_points {
-            if !self.mount_points.contains_key(&name) {
-                match MountPoint::new(PathComponent(name.clone()), &mut self.root_dir) {
+        for mount_point_name in req.mount_points {
+            if !self.mount_points.contains_key(&mount_point_name) {
+                match MountPoint::new(mount_point_name.clone(), &mut self.root_dir) {
                     Ok(mount_point) => {
-                        self.mount_points.insert(name, mount_point);
+                        self.mount_points.insert(mount_point_name, mount_point);
                     }
                     Err(err) => {
                         warn!(
                             target: Self::name(),
-                            "failed to scan %{} mount point: {}", name, err
+                            "failed to scan %{} mount point: {}", mount_point_name, err
                         );
                     }
                 }
@@ -311,6 +312,12 @@ struct PathComponent(String);
 impl AsRef<Path> for PathComponent {
     fn as_ref(&self) -> &Path {
         self.0.as_ref()
+    }
+}
+
+impl fmt::Display for PathComponent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "{}", self.0)
     }
 }
 
