@@ -1,5 +1,5 @@
 use crate::{atom_as_str, Driver, Status};
-use log::{debug, warn};
+use log::{debug, info, warn};
 use noun::{
     atom::Atom,
     cell::Cell,
@@ -177,8 +177,19 @@ impl FileSystem {
         todo!()
     }
 
-    fn delete_mount_point(&self, _req: DeleteMountPoint) {
-        todo!()
+    fn delete_mount_point(&mut self, req: DeleteMountPoint) {
+        // TODO: explain how implicit `drop()` calls delete the mount point.
+        if let Some(_mount_point) = self.mount_points.remove(&req.mount_point) {
+            info!(
+                target: Self::name(),
+                "deleting mount point %{}", req.mount_point
+            );
+        } else {
+            warn!(
+                target: Self::name(),
+                "mount point %{} is not in the active set of mount points", req.mount_point
+            );
+        }
     }
 
     fn scan_mount_points(&mut self, req: ScanMountPoints) {
