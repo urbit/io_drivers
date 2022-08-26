@@ -91,7 +91,22 @@ impl TryFrom<&Noun> for UpdateFileSystem {
 }
 
 /// A request to commit a mount point.
-struct CommitMountPoint {}
+struct CommitMountPoint {
+    mount_point: PathComponent,
+}
+
+impl TryFrom<&Noun> for CommitMountPoint {
+    type Error = convert::Error;
+
+    fn try_from(data: &Noun) -> Result<Self, Self::Error> {
+        if let Noun::Atom(knot) = &*data {
+            let mount_point = PathComponent::try_from(Knot(knot))?;
+            Ok(Self { mount_point })
+        } else {
+            Err(convert::Error::UnexpectedCell)
+        }
+    }
+}
 
 /// A request to delete a mount point.
 struct DeleteMountPoint {
