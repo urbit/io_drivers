@@ -38,13 +38,14 @@ impl TryFrom<Noun> for Request {
         if let Noun::Cell(req) = req {
             let (tag, data) = req.into_parts();
             if let Noun::Atom(tag) = &*tag {
-                // These tag names are terrible, but we unfortunatley can't do anything about
+                // These tag names are terrible, but we unfortunately can't do anything about
                 // it here because they're determined by the kernel.
                 match atom_as_str(tag)? {
                     "ergo" => Ok(Self::UpdateFileSystem(UpdateFileSystem::try_from(&*data)?)),
+                    "dirk" => Ok(Self::CommitMountPoint(CommitMountPoint::try_from(&*data)?)),
                     "hill" => Ok(Self::ScanMountPoints(ScanMountPoints::try_from(&*data)?)),
                     "ogre" => Ok(Self::DeleteMountPoint(DeleteMountPoint::try_from(&*data)?)),
-                    _ => todo!(),
+                    _tag => Err(convert::Error::ImplType),
                 }
             } else {
                 Err(convert::Error::UnexpectedCell)
