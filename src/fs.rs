@@ -437,10 +437,13 @@ impl MountPoint {
         let res = if path.is_dir() {
             Ok(Self {
                 name,
-                children: None,
+                children: Some(HashMap::new()),
             })
         } else if path.is_file() {
-            todo!()
+            Ok(Self {
+                name,
+                children: None,
+            })
         } else if path.is_symlink() {
             todo!()
         } else {
