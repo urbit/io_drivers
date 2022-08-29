@@ -449,34 +449,19 @@ fn read_dir(path: &Path) -> io::Result<HashMap<PathComponent, Entry>> {
 /// A file system mount point.
 ///
 /// All mount points reside within the root directory of a ship (i.e. the pier directory).
-struct MountPoint {
-    /// The path to the mount point.
-    path: PathBuf,
-
-    /// The topmost files and directories within the mount point.
-    children: Option<HashMap<PathComponent, Entry>>,
-}
+struct MountPoint(Entry);
 
 impl MountPoint {
     /// Creates a new mount point.
+    ///
+    /// This method does not affect the underlying file system.
     fn new(path: PathBuf) -> io::Result<Self> {
         if path.is_dir() {
-            Ok(Self {
-                path,
-                children: Some(HashMap::new()),
-            })
+            Ok(Self(Entry::Directory(Directory::new(path))))
         } else if path.is_file() {
-            Ok(Self {
-                path,
-                children: None,
-            })
-        } else if path.is_symlink() {
-            todo!()
+            Ok(Self(Entry::File(File::new(path))))
         } else {
-            Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                format!("cannot determine file type of {}", path.display()),
-            ))
+            Err(io::Error::from(io::ErrorKind::Unsupported))
         }
     }
 }
