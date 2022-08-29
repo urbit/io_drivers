@@ -517,25 +517,12 @@ impl Directory {
             Err(io::Error::from(io::ErrorKind::InvalidInput))
         }
     }
-}
 
-impl Drop for Directory {
     /// Deletes a directory and all its children from the file system.
-    fn drop(&mut self) {
-        if let Err(err) = fs::remove_dir_all(&self.path) {
-            warn!(
-                target: FileSystem::name(),
-                "failed to recursively delete directory {}: {}",
-                self.path.display(),
-                err
-            );
-        } else {
-            debug!(
-                target: FileSystem::name(),
-                "recursively deleted directory {}",
-                self.path.display()
-            );
-        }
+    ///
+    /// This is an alias for [`fs::remove_dir_all`]`(&self.path)`.
+    fn remove(self) -> io::Result<()> {
+        fs::remove_dir_all(&self.path)
     }
 }
 
@@ -558,25 +545,12 @@ impl File {
             is_modified: false,
         }
     }
-}
 
-impl Drop for File {
     /// Deletes a file from the file system.
-    fn drop(&mut self) {
-        if let Err(err) = fs::remove_file(&self.path) {
-            warn!(
-                target: FileSystem::name(),
-                "failed to delete file {}: {}",
-                self.path.display(),
-                err
-            );
-        } else {
-            debug!(
-                target: FileSystem::name(),
-                "deleted file {}",
-                self.path.display()
-            );
-        }
+    ///
+    /// This is an alias for [`fs::remove_file`]`(&self.path)`.
+    fn remove(self) -> io::Result<()> {
+        fs::remove_file(&self.path)
     }
 }
 
@@ -731,12 +705,12 @@ mod tests {
     }
 
     #[test]
-    fn drop_file() {
+    fn remove_file() {
         {
             let path = path!("what-are-the-odds-this-already-exists.txt");
             assert!(fs::File::create(&path).is_ok());
             let file = File::new(path.clone());
-            drop(file);
+            file.remove().expect("remove file");
             let res = fs::File::open(&path);
             assert!(res.is_err());
             assert_eq!(res.unwrap_err().kind(), io::ErrorKind::NotFound);
@@ -744,7 +718,7 @@ mod tests {
     }
 
     #[test]
-    fn drop_dir() {
+    fn remove_dir() {
         {
             let dir_path = path!("no-way-this-already-exists");
             let file_path = dir_path.join("some-ridiculous-file-name.txt");
@@ -752,7 +726,7 @@ mod tests {
             assert!(fs::File::create(&file_path).is_ok());
             let mut dir = Directory::new(dir_path.clone());
             dir.watch_file(file_path).expect("watch file");
-            drop(dir);
+            dir.remove().expect("remove dir");
             let res = fs::read_dir(dir_path);
             assert!(res.is_err());
             assert_eq!(res.unwrap_err().kind(), io::ErrorKind::NotFound);
