@@ -554,6 +554,25 @@ impl Drop for File {
 mod tests {
     use super::*;
 
+    /// Creates a file system path rooted at the current OS's temporary directory.
+    macro_rules! path {
+        ($($path_component:expr),+ $(,)?) => {{
+            let mut path = std::path::PathBuf::new();
+            #[cfg(target_os = "windows")]
+            {
+                path.push(env!("TEMP"));
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                path.push("/tmp");
+            }
+            $(
+                path.push($path_component);
+            )+
+            path
+        }}
+    }
+
     #[test]
     fn convert_knot() {
         macro_rules! test {
@@ -684,13 +703,11 @@ mod tests {
     #[test]
     fn drop_file() {
         {
-            let path = Path::new("/tmp/what-are-the-odds-this-already-exists.txt");
-            assert!(fs::File::create(path).is_ok());
-            let file = File {
-                path: path.to_path_buf(),
-            };
+            let path = path!("what-are-the-odds-this-already-exists.txt");
+            assert!(fs::File::create(&path).is_ok());
+            let file = File { path: path.clone() };
             drop(file);
-            let res = fs::File::open(path);
+            let res = fs::File::open(&path);
             assert!(res.is_err());
             assert_eq!(res.unwrap_err().kind(), io::ErrorKind::NotFound);
         }
@@ -699,12 +716,12 @@ mod tests {
     #[test]
     fn drop_dir() {
         {
-            let dir_path = Path::new("/tmp/no-way-this-already-exists");
+            let dir_path = path!("no-way-this-already-exists");
             let file_path = dir_path.join("some-ridiculous-file-name.txt");
-            assert!(fs::create_dir(dir_path).is_ok());
+            assert!(fs::create_dir(&dir_path).is_ok());
             assert!(fs::File::create(&file_path).is_ok());
             let dir = Directory {
-                path: dir_path.to_path_buf(),
+                path: dir_path.clone(),
                 children: HashMap::from([(
                     PathComponent(file_path.file_name().unwrap().to_str().unwrap().to_string()),
                     Entry::File(File { path: file_path }),
