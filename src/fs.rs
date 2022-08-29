@@ -477,12 +477,12 @@ struct Directory {
     /// The path to the directory. Cannot be the root directory.
     path: PathBuf,
 
-    /// `true` if the directory has been modified since the last update.
-    is_modified: bool,
-
-    /// The watched files and directories within the directory. This is a subset (although not
-    /// necessarily strict) of the contents of the directory on the file system.
-    children: HashMap<PathComponent, Entry>,
+    /// The watched files and directories within the directory.
+    /// TODO: explain what `None` means.
+    ///
+    /// This is a subset (although not necessarily a strict subset) of the contents of the directory
+    /// on the file system.
+    children: Option<HashMap<PathComponent, Entry>>,
 }
 
 impl Directory {
@@ -492,29 +492,7 @@ impl Directory {
     fn new(path: PathBuf) -> Self {
         Self {
             path,
-            is_modified: false,
-            children: HashMap::new(),
-        }
-    }
-
-    /// Adds a new file entry to a directory's watch set of children.
-    ///
-    /// This method does not affect the underlying file system.
-    fn watch_file(&mut self, file_path: PathBuf) -> io::Result<()> {
-        if file_path.parent() == Some(&self.path) {
-            let file_name = PathComponent(
-                file_path
-                    .file_name()
-                    .ok_or(io::Error::from(io::ErrorKind::InvalidInput))?
-                    .to_str()
-                    .ok_or(io::Error::from(io::ErrorKind::InvalidInput))?
-                    .to_string(),
-            );
-            self.children
-                .insert(file_name, Entry::File(File::new(file_path)));
-            Ok(())
-        } else {
-            Err(io::Error::from(io::ErrorKind::InvalidInput))
+            children: None,
         }
     }
 
@@ -531,7 +509,11 @@ struct File {
     /// The path to the file.
     path: PathBuf,
 
-    /// `true` if the file has been modified since the last update.
+    /// The hash of the contents of the file after the last update.
+    /// If `None`, no update has been performed yet.
+    hash: Option<u64>,
+
+    /// `true` if the file was modified since the last update.
     is_modified: bool,
 }
 
@@ -542,7 +524,37 @@ impl File {
     fn new(path: PathBuf) -> Self {
         Self {
             path,
+            hash: None,
             is_modified: false,
+        }
+    }
+
+    /// Reads the contents of a file into an atom, returning `None` if the file didn't change since
+    /// the last update.
+    fn read(&mut self) -> Option<io::Result<Atom>> {
+        if self.hash.is_none() || self.is_modified {
+            self.is_modified = false;
+            let atom = match fs::read(&self.path) {
+                Ok(bytes) => Atom::from(bytes),
+                Err(err) => return Some(Err(err)),
+            };
+            let (new_hash, old_hash) = (atom.hash(), self.hash);
+            if old_hash != Some(new_hash) {
+                self.hash = Some(new_hash);
+                Some(Ok(atom))
+            } else {
+                debug!(
+                    "{} should have changed but the old and new hashes match",
+                    self.path.display()
+                );
+                None
+            }
+        } else {
+            debug!(
+                "{} has not changed since the last update",
+                self.path.display()
+            );
+            None
         }
     }
 
@@ -725,7 +737,6 @@ mod tests {
             assert!(fs::create_dir(&dir_path).is_ok());
             assert!(fs::File::create(&file_path).is_ok());
             let mut dir = Directory::new(dir_path.clone());
-            dir.watch_file(file_path).expect("watch file");
             dir.remove().expect("remove dir");
             let res = fs::read_dir(dir_path);
             assert!(res.is_err());
