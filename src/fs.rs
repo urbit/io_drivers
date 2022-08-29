@@ -420,6 +420,32 @@ impl TryFrom<KnotList<&Cell>> for PathBuf {
 // File System Entries
 //==================================================================================================
 
+/// Collects the entries of a directory that are valid [`PathComponent`]s.
+///
+/// `.` and `..` are omitted from the map of returned entries because they are not valid
+/// [`PathComponent`]s.
+fn read_dir(path: &Path) -> io::Result<HashMap<PathComponent, Entry>> {
+    let mut entries = HashMap::new();
+    for entry in fs::read_dir(path)? {
+        let path = entry?.path();
+        if let Some(entry_name) = path.file_name() {
+            if let Ok(entry_name) = PathComponent::try_from(entry_name) {
+                let entry = if path.is_dir() {
+                    Entry::Directory(Directory::new(path))
+                } else if path.is_file() {
+                    Entry::File(File::new(path))
+                } else if path.is_symlink() {
+                    todo!()
+                } else {
+                    continue;
+                };
+                entries.insert(entry_name, entry);
+            }
+        }
+    }
+    Ok(entries)
+}
+
 /// A file system mount point.
 ///
 /// All mount points reside within the root directory of a ship (i.e. the pier directory).
