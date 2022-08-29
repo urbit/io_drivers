@@ -318,7 +318,6 @@ impl TryFrom<PathComponent> for Knot<Atom> {
 /// A list of `$knot`.
 struct KnotList<C: Cellish>(C);
 
-/// Attempts to create a [`KnotList`] from a [`Path`].
 impl TryFrom<&Path> for KnotList<Cell> {
     type Error = ();
 
@@ -354,7 +353,6 @@ impl fmt::Display for PathComponent {
     }
 }
 
-/// Attempts to create a [`PathComponent`] from a [`Knot`].
 impl TryFrom<Knot<&Atom>> for PathComponent {
     type Error = convert::Error;
 
@@ -376,7 +374,6 @@ impl TryFrom<Knot<&Atom>> for PathComponent {
     }
 }
 
-/// Attempts to create a [`PathComponent`] from a [`&Noun`].
 impl TryFrom<&Noun> for PathComponent {
     type Error = convert::Error;
 
@@ -389,7 +386,6 @@ impl TryFrom<&Noun> for PathComponent {
     }
 }
 
-/// Attempts to create a [`PathComponent`] from an [`&OsStr`].
 impl TryFrom<&OsStr> for PathComponent {
     type Error = ();
 
@@ -402,7 +398,6 @@ impl TryFrom<&OsStr> for PathComponent {
     }
 }
 
-/// Attempts to create a [`PathBuf`] from a [`KnotList`].
 impl TryFrom<KnotList<&Cell>> for PathBuf {
     type Error = convert::Error;
 
