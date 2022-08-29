@@ -491,7 +491,14 @@ impl Directory {
     /// This method does not affect the underlying file system.
     fn watch_file(&mut self, file_path: PathBuf) -> io::Result<()> {
         if file_path.parent() == Some(&self.path) {
-            let file_name = PathComponent(file_path.file_name().unwrap().to_str().unwrap().to_string());
+            let file_name = PathComponent(
+                file_path
+                    .file_name()
+                    .ok_or(io::Error::from(io::ErrorKind::InvalidInput))?
+                    .to_str()
+                    .ok_or(io::Error::from(io::ErrorKind::InvalidInput))?
+                    .to_string(),
+            );
             self.children
                 .insert(file_name, Entry::File(File::new(file_path)));
             Ok(())
