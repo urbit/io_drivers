@@ -69,12 +69,34 @@ impl TryFrom<&Noun> for UpdateFileSystem {
     /// with `%ergo`, where `%ergo` is a poor choice of tag name for an "update file system"
     /// request.
     ///
-    /// A properly structured noun is TODO.
+    /// A properly structured noun is a pair consisting of a mount point (`mp`) and a
+    /// null-terminated list of changes (`cl`) to that mount point:
     /// ```text
-    ///   .
-    ///  / \
-    /// mp  TODO
+    /// [mp cl]
     /// ```
+    ///
+    /// Each element in the list of changes is a pair consisting of a mount-point-relative path to
+    /// the file being changed (represented as a null-terminated list) and a "unit" (i.e. `Option`
+    /// type) detailing the change:
+    ///
+    /// ```text
+    /// [0 <path_list> <byte_cnt> <bytes>]
+    /// ```
+    ///
+    /// To illustrate, if `|=  a=@  +(a)` (a 13-byte change) is written to
+    /// `<pier>/base/gen/example.hoon`, then the noun representing the request (assuming the tag
+    /// `%ergo` tag has already been removed) is:
+    /// ```text
+    /// [
+    ///   %base
+    ///   [%gen %example %hoon 0]
+    ///   [0 [%text %x-hoon 0] 14 0xa2961282b2020403d6120203d7c]
+    ///   0
+    /// ]
+    /// ```
+    /// Note that `14` is the length of the change to `example.hoon` plus one (for the record
+    /// separator i.e. ASCII `30`) and `0xa2961282b2020403d6120203d7c` is `|=  a=@  +(a)<RS>`
+    /// represented as an atom (where `<RS>` is the record separator).
     fn try_from(data: &Noun) -> Result<Self, Self::Error> {
         if let Noun::Cell(data) = &*data {
             if let Noun::Atom(knot) = &*data.head() {
@@ -134,16 +156,10 @@ impl TryFrom<&Noun> for ScanMountPoints {
     /// Attempts to create a [`ScanMountPoints`] request from the tail of a noun that was tagged
     /// with `%hill`, where `%hill` is a poor choice of tag name for a "scan mount points" request.
     ///
-    /// A properly structured noun is a null-terminated list of mount points, each of which is an
-    /// atom. For example:
+    /// A properly structured noun is a null-terminated list of mount points (`mp`), each of which
+    /// is an atom:
     /// ```text
-    ///    .
-    ///   / \
-    /// mp   .
-    ///     / \
-    ///    mp  .
-    ///       / \
-    ///      mp  0
+    /// [mp0 mp1 ... mpN 0]
     /// ```
     fn try_from(data: &Noun) -> Result<Self, Self::Error> {
         let mut mount_points = Vec::new();
