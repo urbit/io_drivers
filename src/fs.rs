@@ -436,12 +436,9 @@ fn read_dir(path: &Path) -> io::Result<HashMap<PathComponent, Entry>> {
         if let Some(entry_name) = path.file_name() {
             if let Ok(entry_name) = PathComponent::try_from(entry_name) {
                 let entry = if path.is_dir() {
-                    Entry::Directory(Directory {
-                        path,
-                        children: HashMap::new(),
-                    })
+                    Entry::Directory(Directory::new(path))
                 } else if path.is_file() {
-                    Entry::File(File { path })
+                    Entry::File(File::new(path))
                 } else if path.is_symlink() {
                     todo!()
                 } else {
@@ -497,11 +494,42 @@ enum Entry {
 
 /// A directory monitored by the driver.
 struct Directory {
-    /// The path to the directory.
+    /// The path to the directory. Cannot be the root directory.
     path: PathBuf,
 
-    /// The files and directories within the directory.
+    /// `true` if the directory has been modified since the last update.
+    is_modified: bool,
+
+    /// The watched files and directories within the directory. This is a subset (although not
+    /// necessarily strict) of the contents of the directory on the file system.
     children: HashMap<PathComponent, Entry>,
+}
+
+impl Directory {
+    /// Initializes a new [`Directory`].
+    ///
+    /// This method does not affect the underlying file system.
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            is_modified: false,
+            children: HashMap::new(),
+        }
+    }
+
+    /// Adds a new file entry to a directory's watch set of children.
+    ///
+    /// This method does not affect the underlying file system.
+    fn watch_file(&mut self, file_path: PathBuf) -> io::Result<()> {
+        if file_path.parent() == Some(&self.path) {
+            let file_name = PathComponent(file_path.file_name().unwrap().to_str().unwrap().to_string());
+            self.children
+                .insert(file_name, Entry::File(File::new(file_path)));
+            Ok(())
+        } else {
+            Err(io::Error::from(io::ErrorKind::InvalidInput))
+        }
+    }
 }
 
 impl Drop for Directory {
@@ -528,6 +556,21 @@ impl Drop for Directory {
 struct File {
     /// The path to the file.
     path: PathBuf,
+
+    /// `true` if the file has been modified since the last update.
+    is_modified: bool,
+}
+
+impl File {
+    /// Initializes a new [`File`].
+    ///
+    /// This method does not affect the underlying file system.
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            is_modified: false,
+        }
+    }
 }
 
 impl Drop for File {
@@ -705,7 +748,7 @@ mod tests {
         {
             let path = path!("what-are-the-odds-this-already-exists.txt");
             assert!(fs::File::create(&path).is_ok());
-            let file = File { path: path.clone() };
+            let file = File::new(path.clone());
             drop(file);
             let res = fs::File::open(&path);
             assert!(res.is_err());
@@ -720,13 +763,8 @@ mod tests {
             let file_path = dir_path.join("some-ridiculous-file-name.txt");
             assert!(fs::create_dir(&dir_path).is_ok());
             assert!(fs::File::create(&file_path).is_ok());
-            let dir = Directory {
-                path: dir_path.clone(),
-                children: HashMap::from([(
-                    PathComponent(file_path.file_name().unwrap().to_str().unwrap().to_string()),
-                    Entry::File(File { path: file_path }),
-                )]),
-            };
+            let mut dir = Directory::new(dir_path.clone());
+            dir.watch_file(file_path).expect("watch file");
             drop(dir);
             let res = fs::read_dir(dir_path);
             assert!(res.is_err());
