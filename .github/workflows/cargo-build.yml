@@ -42,9 +42,10 @@ jobs:
         with:
           command: rustdoc
   test:
-    name: Test using ${{ matrix.rust }} on ${{ matrix.os }}
+    name: Test using ${{ matrix.rust }} Rust on ${{ matrix.os }}
     needs: [style, doc]
     strategy:
+      fail-fast: false
       matrix:
         rust:
           - stable
