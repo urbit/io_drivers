@@ -422,8 +422,8 @@ impl TryFrom<KnotList<&Cell>> for PathBuf {
 
 /// Collects the entries of a directory that are valid [`PathComponent`]s.
 ///
-/// `.` and `..` are omitted from the map of returned entries because they are not valid
-/// [`PathComponent`]s.
+/// This function reads from the underlying file system. Also, note that `.` and `..` are omitted
+/// from the map of returned entries because they are not valid [`PathComponent`]s.
 fn read_dir(path: &Path) -> io::Result<HashMap<PathComponent, Entry>> {
     let mut entries = HashMap::new();
     for entry in fs::read_dir(path)? {
