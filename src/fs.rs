@@ -80,7 +80,7 @@ impl TryFrom<&Noun> for UpdateFileSystem {
     /// type) detailing the change:
     ///
     /// ```text
-    /// [0 <path_list> <byte_cnt> <bytes>]
+    /// [<path_list> 0 <file_type_list> <byte_cnt> <bytes>]
     /// ```
     ///
     /// To illustrate, if `|=  a=@  +(a)` (a 13-byte change) is written to
@@ -89,14 +89,30 @@ impl TryFrom<&Noun> for UpdateFileSystem {
     /// ```text
     /// [
     ///   %base
-    ///   [%gen %example %hoon 0]
-    ///   [0 [%text %x-hoon 0] 14 0xa2961282b2020403d6120203d7c]
+    ///   [
+    ///     [%gen %example %hoon 0]
+    ///     [0 [%text %x-hoon 0] 14 0xa2961282b2020403d6120203d7c]
+    ///   ]
     ///   0
     /// ]
     /// ```
     /// Note that `14` is the length of the change to `example.hoon` plus one (for the record
     /// separator i.e. ASCII `30`) and `0xa2961282b2020403d6120203d7c` is `|=  a=@  +(a)<RS>`
     /// represented as an atom (where `<RS>` is the record separator).
+    ///
+    /// If `<pier>/base/gen/example.hoon` is removed, then the noun representing the request is:
+    /// ```text
+    /// [
+    ///     %base
+    ///     [
+    ///         [%gen %example %hoon 0]
+    ///         0
+    ///     ]
+    ///     0
+    /// ]
+    /// ```
+    /// Note that the "unit" detailing the change is `0`, which indicates that the file should be
+    /// removed.
     fn try_from(data: &Noun) -> Result<Self, Self::Error> {
         if let Noun::Cell(data) = &*data {
             if let Noun::Atom(knot) = &*data.head() {
@@ -580,6 +596,12 @@ impl File {
     fn remove(self) -> io::Result<()> {
         fs::remove_file(&self.path)
     }
+}
+
+/// An update to a file.
+struct FileUpdate {
+    /// New contents of the file.
+    bytes: Vec<u8>, 
 }
 
 #[cfg(test)]
