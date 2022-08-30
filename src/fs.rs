@@ -1,5 +1,7 @@
+#![allow(dead_code, unreachable_code)]
+
 use crate::{atom_as_str, Driver, Status};
-use log::{debug, info, warn};
+use log::debug;
 use noun::{
     atom::Atom,
     cell::Cell,
@@ -59,54 +61,11 @@ struct UpdateFileSystem {
 impl TryFrom<&Noun> for UpdateFileSystem {
     type Error = convert::Error;
 
-    /// Attempts to create a [`UpdateFileSystem`] request from the tail of a noun that was tagged
-    /// with `%ergo`, where `%ergo` is a poor choice of tag name for an "update file system"
-    /// request.
-    ///
-    /// A properly structured noun is a pair consisting of a mount point (`mp`) and a
-    /// null-terminated list of changes (`cl`) to that mount point:
-    /// ```text
-    /// [mp cl]
-    /// ```
-    ///
-    /// Each element in the list of changes is a pair consisting of a mount-point-relative path to
-    /// the file being changed (represented as a null-terminated list) and a "unit" (i.e. `Option`
-    /// type) detailing the change:
+    /// A properly structured noun is:
     ///
     /// ```text
-    /// [<path_list> 0 <file_type_list> <byte_cnt> <bytes>]
+    /// [<mount_point> <change_list>]
     /// ```
-    ///
-    /// To illustrate, if `|=  a=@  +(a)` (a 13-byte change) is written to
-    /// `<pier>/base/gen/example.hoon`, then the noun representing the request (assuming the tag
-    /// `%ergo` tag has already been removed) is:
-    /// ```text
-    /// [
-    ///   %base
-    ///   [
-    ///     [%gen %example %hoon 0]
-    ///     [0 [%text %x-hoon 0] 14 0xa2961282b2020403d6120203d7c]
-    ///   ]
-    ///   0
-    /// ]
-    /// ```
-    /// Note that `14` is the length of the change to `example.hoon` plus one (for the record
-    /// separator i.e. ASCII `30`) and `0xa2961282b2020403d6120203d7c` is `|=  a=@  +(a)<RS>`
-    /// represented as an atom (where `<RS>` is the record separator).
-    ///
-    /// If `<pier>/base/gen/example.hoon` is removed, then the noun representing the request is:
-    /// ```text
-    /// [
-    ///     %base
-    ///     [
-    ///         [%gen %example %hoon 0]
-    ///         0
-    ///     ]
-    ///     0
-    /// ]
-    /// ```
-    /// Note that the "unit" detailing the change is `0`, which indicates that the file should be
-    /// removed.
     fn try_from(data: &Noun) -> Result<Self, Self::Error> {
         if let Noun::Cell(data) = &*data {
             if let Noun::Atom(knot) = &*data.head() {
@@ -392,6 +351,108 @@ impl File {
     /// This is an alias for [`fs::remove_file`]`(&self.path)`.
     fn remove(self) -> io::Result<()> {
         fs::remove_file(&self.path)
+    }
+}
+
+/// A change to the file system.
+enum Change {
+    /// Edit a file in place.
+    EditFile {
+        /// Mount-point-relative path to the file.
+        path: PathBuf,
+
+        /// New contents of the file.
+        bytes: Vec<u8>,
+    },
+
+    /// Remove a file from the file system.
+    RemoveFile {
+        /// Mount-point-relative path to the file.
+        path: PathBuf,
+    },
+}
+
+impl TryFrom<&Noun> for Change {
+    type Error = convert::Error;
+
+    /// A properly structured noun is one of:
+    ///
+    /// ```text
+    /// [<path_list> 0]
+    /// [<path_list> 0 <file_type_list> <byte_count> <bytes>]
+    /// ```
+    ///
+    /// The former structure removes a file at `<path_list>`, whereas the latter structure edits a
+    /// file of type `<file_type_list>` at `<path_list>`, replacing the previous file contents with
+    /// `<bytes>`.
+    ///
+    /// As a concrete example, writing `|=  a=@  +(a)` (a 13-byte change) to
+    /// `<pier>/base/gen/example.hoon` yields:
+    /// ```text
+    /// [
+    ///   [%gen %example %hoon 0]
+    ///   0
+    ///   [%text %x-hoon 0]
+    ///   14
+    ///   0xa2961282b2020403d6120203d7c
+    /// ]
+    /// ```
+    /// Note that `14` is the length of the change to `example.hoon` plus one (for the record
+    /// separator i.e. ASCII `30`) and `0xa2961282b2020403d6120203d7c` is `|=  a=@  +(a)<RS>`
+    /// represented as an atom (where `<RS>` is the record separator).
+    ///
+    /// Removing `<pier>/base/gen/example.hoon` yields:
+    /// ```text
+    /// [
+    ///   [%gen %example %hoon 0]
+    ///   0
+    /// ]
+    /// ```
+    fn try_from(noun: &Noun) -> Result<Self, Self::Error> {
+        if let Noun::Cell(cell) = noun {
+            if let Noun::Cell(path) = &*cell.head() {
+                let path = PathBuf::try_from(KnotList(path))?;
+                match &*cell.tail() {
+                    Noun::Atom(change) => {
+                        if change.is_null() {
+                            Ok(Change::RemoveFile { path })
+                        } else {
+                            Err(convert::Error::ImplType)
+                        }
+                    }
+                    Noun::Cell(change) => {
+                        let [null, _file_type_list, byte_len, bytes] =
+                            change.to_array::<4>().ok_or(convert::Error::ImplType)?;
+                        if let Noun::Atom(null) = &*null {
+                            if let Noun::Atom(byte_len) = &*byte_len {
+                                if let Noun::Atom(bytes) = &*bytes {
+                                    if null.is_null() {
+                                        let bytes = bytes.to_vec();
+                                        debug_assert_eq!(
+                                            byte_len.as_usize().expect("atom to usize"),
+                                            bytes.len()
+                                        );
+                                        Ok(Change::EditFile { path, bytes })
+                                    } else {
+                                        Err(convert::Error::ImplType)
+                                    }
+                                } else {
+                                    Err(convert::Error::UnexpectedCell)
+                                }
+                            } else {
+                                Err(convert::Error::UnexpectedCell)
+                            }
+                        } else {
+                            Err(convert::Error::UnexpectedCell)
+                        }
+                    }
+                }
+            } else {
+                Err(convert::Error::UnexpectedAtom)
+            }
+        } else {
+            Err(convert::Error::UnexpectedAtom)
+        }
     }
 }
 
