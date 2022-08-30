@@ -26,9 +26,6 @@ use tokio::{
 /// Requests that can be handled by the file system driver.
 enum Request {
     UpdateFileSystem(UpdateFileSystem),
-    CommitMountPoint(CommitMountPoint),
-    DeleteMountPoint(DeleteMountPoint),
-    ScanMountPoints(ScanMountPoints),
 }
 
 impl TryFrom<Noun> for Request {
@@ -42,9 +39,6 @@ impl TryFrom<Noun> for Request {
                 // it here because they're determined by the kernel.
                 match atom_as_str(tag)? {
                     "ergo" => Ok(Self::UpdateFileSystem(UpdateFileSystem::try_from(&*data)?)),
-                    "dirk" => Ok(Self::CommitMountPoint(CommitMountPoint::try_from(&*data)?)),
-                    "hill" => Ok(Self::ScanMountPoints(ScanMountPoints::try_from(&*data)?)),
-                    "ogre" => Ok(Self::DeleteMountPoint(DeleteMountPoint::try_from(&*data)?)),
                     _tag => Err(convert::Error::ImplType),
                 }
             } else {
@@ -129,72 +123,6 @@ impl TryFrom<&Noun> for UpdateFileSystem {
     }
 }
 
-/// A request to commit a mount point.
-struct CommitMountPoint {
-    mount_point: PathComponent,
-}
-
-impl TryFrom<&Noun> for CommitMountPoint {
-    type Error = convert::Error;
-
-    fn try_from(data: &Noun) -> Result<Self, Self::Error> {
-        Ok(Self {
-            mount_point: PathComponent::try_from(data)?,
-        })
-    }
-}
-
-/// A request to delete a mount point.
-struct DeleteMountPoint {
-    /// The mount point to delete.
-    mount_point: PathComponent,
-}
-
-impl TryFrom<&Noun> for DeleteMountPoint {
-    type Error = convert::Error;
-
-    fn try_from(data: &Noun) -> Result<Self, Self::Error> {
-        Ok(Self {
-            mount_point: PathComponent::try_from(data)?,
-        })
-    }
-}
-
-/// A request to scan a list of mount points.
-struct ScanMountPoints {
-    /// The names of the mount points to scan.
-    mount_points: Vec<PathComponent>,
-}
-
-impl TryFrom<&Noun> for ScanMountPoints {
-    type Error = convert::Error;
-
-    /// Attempts to create a [`ScanMountPoints`] request from the tail of a noun that was tagged
-    /// with `%hill`, where `%hill` is a poor choice of tag name for a "scan mount points" request.
-    ///
-    /// A properly structured noun is a null-terminated list of mount points (`mp`), each of which
-    /// is an atom:
-    /// ```text
-    /// [mp0 mp1 ... mpN 0]
-    /// ```
-    fn try_from(data: &Noun) -> Result<Self, Self::Error> {
-        let mut mount_points = Vec::new();
-        if let Noun::Cell(data) = data {
-            let data = data.to_vec();
-            // Skip the null terminator at the end of the list.
-            for knot in &data[0..data.len() - 1] {
-                if let Noun::Atom(knot) = &**knot {
-                    let mount_point = PathComponent::try_from(Knot(knot))?;
-                    mount_points.push(mount_point);
-                } else {
-                    return Err(convert::Error::UnexpectedCell);
-                }
-            }
-        }
-        Ok(Self { mount_points })
-    }
-}
-
 //==================================================================================================
 // Driver
 //==================================================================================================
@@ -213,55 +141,6 @@ pub struct FileSystem {
 impl FileSystem {
     fn update_file_system(&self, _req: UpdateFileSystem) {
         todo!()
-    }
-
-    fn commit_mount_point(&self, req: CommitMountPoint) {
-        if let Some(mount_point) = self.mount_points.get(&req.mount_point) {
-            todo!()
-        } else {
-            warn!(
-                target: Self::name(),
-                "failed to commit mount point %{} because it's not in the active set of mount points",
-                req.mount_point
-            );
-        }
-    }
-
-    fn delete_mount_point(&mut self, req: DeleteMountPoint) {
-        if let Some(mount_point) = self.mount_points.remove(&req.mount_point) {
-            // Dropping a mount point deletes all of its children (files and directories) but does
-            // not delete the mount point itself from the file system.
-            drop(mount_point);
-            info!(
-                target: Self::name(),
-                "deleted mount point %{}", req.mount_point
-            );
-        } else {
-            warn!(
-                target: Self::name(),
-                "failed to delete mount point %{} because it's not in the active set of mount points",
-                req.mount_point
-            );
-        }
-    }
-
-    fn scan_mount_points(&mut self, req: ScanMountPoints) {
-        for name in req.mount_points {
-            if !self.mount_points.contains_key(&name) {
-                let path = self.root_dir.join(&name);
-                match MountPoint::new(path) {
-                    Ok(mount_point) => {
-                        self.mount_points.insert(name, mount_point);
-                    }
-                    Err(err) => {
-                        warn!(
-                            target: Self::name(),
-                            "failed to scan %{} mount point: {}", name, err
-                        );
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -289,9 +168,6 @@ macro_rules! impl_driver {
                     while let Some(req) = input_rx.recv().await {
                         match Request::try_from(req) {
                             Ok(Request::UpdateFileSystem(req)) => self.update_file_system(req),
-                            Ok(Request::CommitMountPoint(req)) => self.commit_mount_point(req),
-                            Ok(Request::DeleteMountPoint(req)) => self.delete_mount_point(req),
-                            Ok(Request::ScanMountPoints(req)) => self.scan_mount_points(req),
                             _ => todo!(),
                         }
                     }
@@ -452,89 +328,10 @@ impl TryFrom<KnotList<&Cell>> for PathBuf {
 // File System Entries
 //==================================================================================================
 
-/// Collects the entries of a directory that are valid [`PathComponent`]s.
-///
-/// This function reads from the underlying file system. Also, note that `.` and `..` are omitted
-/// from the map of returned entries because they are not valid [`PathComponent`]s.
-fn read_dir(path: &Path) -> io::Result<HashMap<PathComponent, Entry>> {
-    let mut entries = HashMap::new();
-    for entry in fs::read_dir(path)? {
-        let path = entry?.path();
-        if let Some(entry_name) = path.file_name() {
-            if let Ok(entry_name) = PathComponent::try_from(entry_name) {
-                let entry = if path.is_dir() {
-                    Entry::Directory(Directory::new(path))
-                } else if path.is_file() {
-                    Entry::File(File::new(path))
-                } else if path.is_symlink() {
-                    todo!()
-                } else {
-                    continue;
-                };
-                entries.insert(entry_name, entry);
-            }
-        }
-    }
-    Ok(entries)
-}
-
 /// A file system mount point.
 ///
 /// All mount points reside within the root directory of a ship (i.e. the pier directory).
-struct MountPoint(Entry);
-
-impl MountPoint {
-    /// Creates a new mount point.
-    ///
-    /// This method does not affect the underlying file system.
-    fn new(path: PathBuf) -> io::Result<Self> {
-        if path.is_dir() {
-            Ok(Self(Entry::Directory(Directory::new(path))))
-        } else if path.is_file() {
-            Ok(Self(Entry::File(File::new(path))))
-        } else {
-            Err(io::Error::from(io::ErrorKind::Unsupported))
-        }
-    }
-}
-
-/// A file system entry monitored by the driver.
-enum Entry {
-    Directory(Directory),
-    File(File),
-}
-
-/// A directory monitored by the driver.
-struct Directory {
-    /// The path to the directory. Cannot be the root directory.
-    path: PathBuf,
-
-    /// The watched files and directories within the directory.
-    /// TODO: explain what `None` means.
-    ///
-    /// This is a subset (although not necessarily a strict subset) of the contents of the directory
-    /// on the file system.
-    children: Option<HashMap<PathComponent, Entry>>,
-}
-
-impl Directory {
-    /// Initializes a new [`Directory`].
-    ///
-    /// This method does not affect the underlying file system.
-    fn new(path: PathBuf) -> Self {
-        Self {
-            path,
-            children: None,
-        }
-    }
-
-    /// Deletes a directory and all its children from the file system.
-    ///
-    /// This is an alias for [`fs::remove_dir_all`]`(&self.path)`.
-    fn remove(self) -> io::Result<()> {
-        fs::remove_dir_all(&self.path)
-    }
-}
+struct MountPoint(PathBuf);
 
 /// A file monitored by the driver.
 struct File {
@@ -596,12 +393,6 @@ impl File {
     fn remove(self) -> io::Result<()> {
         fs::remove_file(&self.path)
     }
-}
-
-/// An update to a file.
-struct FileUpdate {
-    /// New contents of the file.
-    bytes: Vec<u8>, 
 }
 
 #[cfg(test)]
@@ -762,21 +553,6 @@ mod tests {
             let file = File::new(path.clone());
             file.remove().expect("remove file");
             let res = fs::File::open(&path);
-            assert!(res.is_err());
-            assert_eq!(res.unwrap_err().kind(), io::ErrorKind::NotFound);
-        }
-    }
-
-    #[test]
-    fn remove_dir() {
-        {
-            let dir_path = path!("no-way-this-already-exists");
-            let file_path = dir_path.join("some-ridiculous-file-name.txt");
-            assert!(fs::create_dir(&dir_path).is_ok());
-            assert!(fs::File::create(&file_path).is_ok());
-            let mut dir = Directory::new(dir_path.clone());
-            dir.remove().expect("remove dir");
-            let res = fs::read_dir(dir_path);
             assert!(res.is_err());
             assert_eq!(res.unwrap_err().kind(), io::ErrorKind::NotFound);
         }
