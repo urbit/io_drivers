@@ -182,7 +182,7 @@ impl TryFrom<PathComponent> for Knot<Atom> {
     }
 }
 
-/// A list of `$knot`.
+/// A null-terminated list of `$knot`.
 struct KnotList<C: Cellish>(C);
 
 impl TryFrom<&Path> for KnotList<Cell> {
@@ -190,14 +190,26 @@ impl TryFrom<&Path> for KnotList<Cell> {
 
     fn try_from(path: &Path) -> Result<Self, Self::Error> {
         let mut path_components = Vec::new();
-        for path_component in path.components() {
-            let path_component =
-                PathComponent(path_component.as_os_str().to_str().ok_or(())?.to_string());
-            let knot = Knot::try_from(path_component)?;
-            path_components.push(Rc::<Noun>::from(knot.0));
+        if let Some(parent) = path.parent() {
+            for path_component in parent.components() {
+                let path_component =
+                    PathComponent(path_component.as_os_str().to_str().ok_or(())?.to_string());
+                let knot = Knot::try_from(path_component)?;
+                path_components.push(Rc::<Noun>::from(knot.0));
+            }
         }
-        // TODO: determine if `Atom::null()` should be pushed onto `path_components`.
-        Ok(KnotList(Cell::from(path_components)))
+        if let Some(stem) = path.file_stem() {
+            let stem = Atom::try_from(stem)?;
+            path_components.push(Rc::<Noun>::from(stem));
+            if let Some(extension) = path.extension() {
+                let extension = Atom::try_from(extension)?;
+                path_components.push(Rc::<Noun>::from(extension));
+            }
+            path_components.push(Rc::<Noun>::from(Atom::null()));
+            Ok(KnotList(Cell::from(path_components)))
+        } else {
+            Err(())
+        }
     }
 }
 
@@ -578,22 +590,27 @@ mod tests {
             };
         }
 
+        // `KnotList` -> `Path`: expect success.
         {
             test!(knot_list: ["hello", "goodbye"], path: "hello/goodbye");
             test!(knot_list: ["some", ".", "path"], path: "some/!./path");
             test!(knot_list: ["..", "!", "", "jian3", "fei2"], path: "!../!!/!/jian3/fei2");
         }
 
+        // `KnotList` -> `Path`: expect failure.
         {
             test!(knot_list: [&format!("{}uh-oh", path::MAIN_SEPARATOR), "gan4ma2"]);
         }
 
+        // `Path` -> `KnotList`: expect success.
         {
-            test!(path: "la/dee/da", knot_list: ["la", "dee", "da"]);
-            test!(path: "some/!!escaped/path", knot_list: ["some", "!escaped", "path"]);
-            test!(path: "!./!../!/more/components", knot_list: [".", "..", "", "more", "components"]);
+            test!(path: "la/dee/da", knot_list: ["la", "dee", "da", ""]);
+            test!(path: "a/b/c.d", knot_list: ["a", "b", "c", "d", ""]);
+            test!(path: "some/!!escaped/path", knot_list: ["some", "!escaped", "path", ""]);
+            test!(path: "!./!../!/more/components", knot_list: [".", "..", "", "more", "components", ""]);
         }
 
+        // `Path` -> `KnotList`: expect failure.
         {
             test!(
                 path: format!(
