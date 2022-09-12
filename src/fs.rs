@@ -70,25 +70,15 @@ impl TryFrom<&Noun> for UpdateFileSystem {
     /// [<mount_point> <change_list>]
     /// ```
     ///
-    /// where `<change_list>` is a null-terminated list of changes to make to the file system. See
-    /// [`Change`] for the structure of a single change.
+    /// where `<mount_point>` is the name of the mount point and `<change_list>` is a
+    /// null-terminated list of changes to make to the file system. See [`Change`] for the structure
+    /// of a single change.
     fn try_from(data: &Noun) -> Result<Self, Self::Error> {
         if let Noun::Cell(data) = &*data {
             if let Noun::Atom(head) = &*data.head() {
-                let mount_point = match env::current_dir() {
-                    Ok(mut cwd) => {
-                        cwd.push(PathComponent::try_from(Knot(head))?);
-                        MountPoint(cwd)
-                    }
-                    Err(err) => {
-                        warn!(
-                            target: FileSystem::name(),
-                            "failed to access current directory: {}", err
-                        );
-                        return Err(convert::Error::ImplType);
-                    }
-                };
                 if let Noun::Cell(tail) = &*data.tail() {
+                    let mount_point = MountPoint::new(PathComponent::try_from(Knot(head))?)
+                        .map_err(|_err| convert::Error::ImplType)?;
                     let mut tail = tail.to_vec();
                     // Remove null terminator.
                     tail.pop();
@@ -339,6 +329,15 @@ impl TryFrom<KnotList<&Cell>> for PathBuf {
 /// A mount point consists of the current working directory of the driver and the mount point name,
 /// which means that a mount point is simply an absolute path.
 struct MountPoint(PathBuf);
+
+impl MountPoint {
+    /// Creates a new mount point relative to the current working directory.
+    fn new(name: PathComponent) -> io::Result<Self> {
+        let mut cwd = env::current_dir()?;
+        cwd.push(name);
+        Ok(Self(cwd))
+    }
+}
 
 /// Enables a [`MountPoint`] to be pushed onto a [`std::path::Path`] or [`std::path::PathBuf`].
 impl AsRef<Path> for MountPoint {
