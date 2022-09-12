@@ -10,7 +10,6 @@ use noun::{
     Noun, Rc,
 };
 use std::{
-    collections::HashMap,
     ffi::OsStr,
     fmt, fs,
     path::{self, Path, PathBuf},
@@ -87,15 +86,7 @@ impl TryFrom<&Noun> for UpdateFileSystem {
 //==================================================================================================
 
 /// The file system driver.
-pub struct FileSystem {
-    /// The root of file system tree managed by the driver.
-    ///
-    /// This is the pier directory.
-    root_dir: PathBuf,
-
-    /// A map from mount point name to mount point.
-    mount_points: HashMap<PathComponent, MountPoint>,
-}
+pub struct FileSystem;
 
 impl FileSystem {
     fn update_file_system(&self, _req: UpdateFileSystem) {
@@ -108,10 +99,7 @@ macro_rules! impl_driver {
     ($input_src:ty, $output_sink:ty) => {
         impl Driver<$input_src, $output_sink> for FileSystem {
             fn new() -> Result<Self, Status> {
-                Ok(Self {
-                    root_dir: todo!(),
-                    mount_points: HashMap::new(),
-                })
+                Ok(Self{})
             }
 
             fn name() -> &'static str {
