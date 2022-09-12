@@ -119,7 +119,7 @@ macro_rules! impl_driver {
             }
 
             fn handle_requests(
-                mut self,
+                self,
                 mut input_rx: Receiver<Noun>,
                 _output_tx: Sender<Noun>,
             ) -> JoinHandle<Status> {
@@ -282,9 +282,12 @@ impl TryFrom<KnotList<&Cell>> for PathBuf {
 
     fn try_from(knot_list: KnotList<&Cell>) -> Result<Self, Self::Error> {
         let mut path = PathBuf::new();
-        // TODO: determine if is `knot_list` null-terminated.
-        for knot in knot_list.0.to_vec() {
+        let mut knot_list = knot_list.0.to_vec();
+        // Remove null terminator.
+        knot_list.pop();
+        for knot in knot_list {
             if let Noun::Atom(knot) = &*knot {
+                // TODO: handle file_name.extension case.
                 let path_component = PathComponent::try_from(Knot(knot))?;
                 path.push(path_component);
             } else {
@@ -592,9 +595,9 @@ mod tests {
 
         // `KnotList` -> `Path`: expect success.
         {
-            test!(knot_list: ["hello", "goodbye"], path: "hello/goodbye");
-            test!(knot_list: ["some", ".", "path"], path: "some/!./path");
-            test!(knot_list: ["..", "!", "", "jian3", "fei2"], path: "!../!!/!/jian3/fei2");
+            test!(knot_list: ["hello", "goodbye", ""], path: "hello/goodbye");
+            test!(knot_list: ["some", ".", "path", ""], path: "some/!./path");
+            test!(knot_list: ["..", "!", "", "jian3", "fei2", ""], path: "!../!!/!/jian3/fei2");
         }
 
         // `KnotList` -> `Path`: expect failure.
