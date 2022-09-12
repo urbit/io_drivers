@@ -1,7 +1,7 @@
 #![allow(dead_code, unreachable_code)]
 
 use crate::{atom_as_str, Driver, Status};
-use log::{debug, warn};
+use log::debug;
 use noun::{
     atom::Atom,
     cell::Cell,
@@ -27,6 +27,7 @@ use tokio::{
 
 /// Requests that can be handled by the file system driver.
 enum Request {
+    DeleteMountPoint(DeleteMountPoint),
     UpdateFileSystem(UpdateFileSystem),
 }
 
@@ -40,6 +41,7 @@ impl TryFrom<Noun> for Request {
                 // These tag names are terrible, but we unfortunately can't do anything about
                 // it here because they're determined by the kernel.
                 match atom_as_str(tag)? {
+                    "ogre" => Ok(Self::DeleteMountPoint(DeleteMountPoint::try_from(&*data)?)),
                     "ergo" => Ok(Self::UpdateFileSystem(UpdateFileSystem::try_from(&*data)?)),
                     _tag => Err(convert::Error::ImplType),
                 }
@@ -52,9 +54,36 @@ impl TryFrom<Noun> for Request {
     }
 }
 
+/// A request to delete a mount point.
+struct DeleteMountPoint {
+    /// The mount point to delete.
+    mount_point: MountPoint,
+}
+
+impl TryFrom<&Noun> for DeleteMountPoint {
+    type Error = convert::Error;
+
+    /// A properly structured noun is:
+    ///
+    /// ```text
+    /// <mount_point>
+    /// ```
+    ///
+    /// where `<mount_point>` is the name of the mount point.
+    fn try_from(data: &Noun) -> Result<Self, Self::Error> {
+        if let Noun::Atom(data) = &*data {
+            let mount_point = MountPoint::new(PathComponent::try_from(Knot(data))?)
+                .map_err(|_err| convert::Error::ImplType)?;
+            Ok(Self { mount_point })
+        } else {
+            Err(convert::Error::UnexpectedAtom)
+        }
+    }
+}
+
 /// A request to update the file system.
 struct UpdateFileSystem {
-    /// The absolute path to the mount point to update.
+    /// The mount point to update.
     mount_point: MountPoint,
 
     /// Changes to apply to the contents of the mount point.
@@ -110,6 +139,11 @@ impl TryFrom<&Noun> for UpdateFileSystem {
 pub struct FileSystem;
 
 impl FileSystem {
+    fn delete_mount_point(&self, req: DeleteMountPoint) {
+        // TODO: better error handling
+        fs::remove_dir_all(req.mount_point.0).expect("remove dir all");
+    }
+
     fn update_file_system(&self, req: UpdateFileSystem) {
         for change in req.changes {
             match change {
@@ -117,10 +151,12 @@ impl FileSystem {
                     // TODO: track hashes of files and don't update file if the hash hasn't
                     // changed.
                     let path: PathBuf = [&req.mount_point.0, &path].iter().collect();
+                    // TODO: better error handling
                     fs::write(path, bytes).expect("write file");
                 }
                 Change::RemoveFile { path } => {
                     let path: PathBuf = [&req.mount_point.0, &path].iter().collect();
+                    // TODO: better error handling
                     fs::remove_file(path).expect("remove file");
                 }
             }
@@ -148,6 +184,7 @@ macro_rules! impl_driver {
                 let task = tokio::spawn(async move {
                     while let Some(req) = input_rx.recv().await {
                         match Request::try_from(req) {
+                            Ok(Request::DeleteMountPoint(req)) => self.delete_mount_point(req),
                             Ok(Request::UpdateFileSystem(req)) => self.update_file_system(req),
                             _ => todo!(),
                         }
