@@ -341,68 +341,6 @@ impl TryFrom<KnotList<&Cell>> for PathBuf {
 /// All mount points reside within the root directory of a ship (i.e. the pier directory).
 struct MountPoint(PathBuf);
 
-/// A file monitored by the driver.
-struct File {
-    /// The path to the file.
-    path: PathBuf,
-
-    /// The hash of the contents of the file after the last update.
-    /// If `None`, no update has been performed yet.
-    hash: Option<u64>,
-
-    /// `true` if the file was modified since the last update.
-    is_modified: bool,
-}
-
-impl File {
-    /// Initializes a new [`File`].
-    ///
-    /// This method does not affect the underlying file system.
-    fn new(path: PathBuf) -> Self {
-        Self {
-            path,
-            hash: None,
-            is_modified: false,
-        }
-    }
-
-    /// Reads the contents of a file into an atom, returning `None` if the file didn't change since
-    /// the last update.
-    fn read(&mut self) -> Option<io::Result<Atom>> {
-        if self.hash.is_none() || self.is_modified {
-            self.is_modified = false;
-            let atom = match fs::read(&self.path) {
-                Ok(bytes) => Atom::from(bytes),
-                Err(err) => return Some(Err(err)),
-            };
-            let (new_hash, old_hash) = (atom.hash(), self.hash);
-            if old_hash != Some(new_hash) {
-                self.hash = Some(new_hash);
-                Some(Ok(atom))
-            } else {
-                debug!(
-                    "{} should have changed but the old and new hashes match",
-                    self.path.display()
-                );
-                None
-            }
-        } else {
-            debug!(
-                "{} has not changed since the last update",
-                self.path.display()
-            );
-            None
-        }
-    }
-
-    /// Deletes a file from the file system.
-    ///
-    /// This is an alias for [`fs::remove_file`]`(&self.path)`.
-    fn remove(self) -> io::Result<()> {
-        fs::remove_file(&self.path)
-    }
-}
-
 /// A change to the file system.
 enum Change {
     /// Edit a file in place.
@@ -657,19 +595,6 @@ mod tests {
                     path::MAIN_SEPARATOR
                 )
             );
-        }
-    }
-
-    #[test]
-    fn remove_file() {
-        {
-            let path = path!("what-are-the-odds-this-already-exists.txt");
-            assert!(fs::File::create(&path).is_ok());
-            let file = File::new(path.clone());
-            file.remove().expect("remove file");
-            let res = fs::File::open(&path);
-            assert!(res.is_err());
-            assert_eq!(res.unwrap_err().kind(), io::ErrorKind::NotFound);
         }
     }
 }
