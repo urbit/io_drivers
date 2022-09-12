@@ -1,7 +1,7 @@
 #![allow(dead_code, unreachable_code)]
 
 use crate::{atom_as_str, Driver, Status};
-use log::debug;
+use log::{debug, warn};
 use noun::{
     atom::Atom,
     cell::Cell,
@@ -10,6 +10,7 @@ use noun::{
     Noun, Rc,
 };
 use std::{
+    env,
     ffi::OsStr,
     fmt, fs,
     path::{self, Path, PathBuf},
@@ -83,7 +84,10 @@ impl TryFrom<&Noun> for UpdateFileSystem {
                     for change in tail {
                         changes.push(Change::try_from(&*change)?);
                     }
-                    Ok(Self { mount_point, changes })
+                    Ok(Self {
+                        mount_point,
+                        changes,
+                    })
                 } else {
                     Err(convert::Error::UnexpectedAtom)
                 }
@@ -104,8 +108,35 @@ impl TryFrom<&Noun> for UpdateFileSystem {
 pub struct FileSystem;
 
 impl FileSystem {
-    fn update_file_system(&self, _req: UpdateFileSystem) {
-        todo!()
+    fn update_file_system(&self, req: UpdateFileSystem) {
+        let mount_point = match env::current_dir() {
+            Ok(mut cwd) => {
+                cwd.push(req.mount_point);
+                cwd
+            }
+            Err(err) => {
+                warn!(
+                    target: Self::name(),
+                    "failed to access current directory: {}", err
+                );
+                return;
+            }
+        };
+
+        for change in req.changes {
+            match change {
+                Change::EditFile { path, bytes } => {
+                    // TODO: track hashes of files and don't update file if the hash hasn't
+                    // changed.
+                    let path: PathBuf = [&mount_point, &path].iter().collect();
+                    fs::write(path, bytes).expect("write file");
+                }
+                Change::RemoveFile { path } => {
+                    let path: PathBuf = [&mount_point, &path].iter().collect();
+                    fs::remove_file(path).expect("remove file");
+                },
+            }
+        }
     }
 }
 
@@ -114,7 +145,7 @@ macro_rules! impl_driver {
     ($input_src:ty, $output_sink:ty) => {
         impl Driver<$input_src, $output_sink> for FileSystem {
             fn new() -> Result<Self, Status> {
-                Ok(Self{})
+                Ok(Self {})
             }
 
             fn name() -> &'static str {
