@@ -28,6 +28,7 @@ use tokio::{
 /// Requests that can be handled by the file system driver.
 enum Request {
     DeleteMountPoint(DeleteMountPoint),
+    ScanMountPoints(ScanMountPoints),
     UpdateFileSystem(UpdateFileSystem),
 }
 
@@ -42,6 +43,7 @@ impl TryFrom<Noun> for Request {
                 // it here because they're determined by the kernel.
                 match atom_as_str(tag)? {
                     "ogre" => Ok(Self::DeleteMountPoint(DeleteMountPoint::try_from(&*data)?)),
+                    "hill" => Ok(Self::ScanMountPoints(ScanMountPoints::try_from(&*data)?)),
                     "ergo" => Ok(Self::UpdateFileSystem(UpdateFileSystem::try_from(&*data)?)),
                     _tag => Err(convert::Error::ImplType),
                 }
@@ -75,6 +77,40 @@ impl TryFrom<&Noun> for DeleteMountPoint {
             let mount_point = MountPoint::new(PathComponent::try_from(Knot(data))?)
                 .map_err(|_err| convert::Error::ImplType)?;
             Ok(Self { mount_point })
+        } else {
+            Err(convert::Error::UnexpectedAtom)
+        }
+    }
+}
+
+/// A request to scan a list of mount points.
+struct ScanMountPoints {
+    /// The mount points to scan.
+    mount_points: Vec<MountPoint>,
+}
+
+impl TryFrom<&Noun> for ScanMountPoints {
+    type Error = convert::Error;
+
+    /// A properly structured noun is:
+    ///
+    /// ```text
+    /// <mount_point_list>
+    /// ```
+    ///
+    /// where `<mount_point_list>`, is a null-terminated list of mount point names to scan.
+    fn try_from(data: &Noun) -> Result<Self, Self::Error> {
+        if let Noun::Cell(data) = &*data {
+            let mut data = data.to_vec();
+            // Remove null terminator.
+            data.pop();
+            let mut mount_points = Vec::new();
+            for mount_point in data {
+                let mount_point = MountPoint::new(PathComponent::try_from(&*mount_point)?)
+                    .map_err(|_err| convert::Error::ImplType)?;
+                mount_points.push(mount_point);
+            }
+            Ok(Self { mount_points })
         } else {
             Err(convert::Error::UnexpectedAtom)
         }
@@ -139,11 +175,21 @@ impl TryFrom<&Noun> for UpdateFileSystem {
 pub struct FileSystem;
 
 impl FileSystem {
+    /// Handles a [`DeleteMountPoint`] request.
     fn delete_mount_point(&self, req: DeleteMountPoint) {
         // TODO: better error handling
         fs::remove_dir_all(req.mount_point.0).expect("remove dir all");
     }
 
+    /// Handles a [`ScanMountPoints`] request.
+    fn scan_mount_points(&self, _req: ScanMountPoints) {
+        // This is a no-op. The request is designed to inform the driver to scan a list of mount
+        // points and update its in-memory representation of the state of the mount points, but
+        // because this implementation of the driver aims to be as stateless as possible, this is
+        // not necessary.
+    }
+
+    /// Handles an [`UpdateFileSystem`] request.
     fn update_file_system(&self, req: UpdateFileSystem) {
         for change in req.changes {
             match change {
@@ -185,6 +231,7 @@ macro_rules! impl_driver {
                     while let Some(req) = input_rx.recv().await {
                         match Request::try_from(req) {
                             Ok(Request::DeleteMountPoint(req)) => self.delete_mount_point(req),
+                            Ok(Request::ScanMountPoints(req)) => self.scan_mount_points(req),
                             Ok(Request::UpdateFileSystem(req)) => self.update_file_system(req),
                             _ => todo!(),
                         }
