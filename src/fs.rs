@@ -54,10 +54,10 @@ impl TryFrom<Noun> for Request {
 
 /// A request to update the file system.
 struct UpdateFileSystem {
-    /// The mount point to update.
-    mount_point: PathComponent,
+    /// The absolute path to the mount point to update.
+    mount_point: MountPoint,
 
-    /// Changes to apply to the file system.
+    /// Changes to apply to the contents of the mount point.
     changes: Vec<Change>,
 }
 
@@ -75,7 +75,19 @@ impl TryFrom<&Noun> for UpdateFileSystem {
     fn try_from(data: &Noun) -> Result<Self, Self::Error> {
         if let Noun::Cell(data) = &*data {
             if let Noun::Atom(head) = &*data.head() {
-                let mount_point = PathComponent::try_from(Knot(head))?;
+                let mount_point = match env::current_dir() {
+                    Ok(mut cwd) => {
+                        cwd.push(PathComponent::try_from(Knot(head))?);
+                        MountPoint(cwd)
+                    }
+                    Err(err) => {
+                        warn!(
+                            target: FileSystem::name(),
+                            "failed to access current directory: {}", err
+                        );
+                        return Err(convert::Error::ImplType);
+                    }
+                };
                 if let Noun::Cell(tail) = &*data.tail() {
                     let mut tail = tail.to_vec();
                     // Remove null terminator.
@@ -109,32 +121,18 @@ pub struct FileSystem;
 
 impl FileSystem {
     fn update_file_system(&self, req: UpdateFileSystem) {
-        let mount_point = match env::current_dir() {
-            Ok(mut cwd) => {
-                cwd.push(req.mount_point);
-                cwd
-            }
-            Err(err) => {
-                warn!(
-                    target: Self::name(),
-                    "failed to access current directory: {}", err
-                );
-                return;
-            }
-        };
-
         for change in req.changes {
             match change {
                 Change::EditFile { path, bytes } => {
                     // TODO: track hashes of files and don't update file if the hash hasn't
                     // changed.
-                    let path: PathBuf = [&mount_point, &path].iter().collect();
+                    let path: PathBuf = [&req.mount_point.0, &path].iter().collect();
                     fs::write(path, bytes).expect("write file");
                 }
                 Change::RemoveFile { path } => {
-                    let path: PathBuf = [&mount_point, &path].iter().collect();
+                    let path: PathBuf = [&req.mount_point.0, &path].iter().collect();
                     fs::remove_file(path).expect("remove file");
-                },
+                }
             }
         }
     }
@@ -338,8 +336,16 @@ impl TryFrom<KnotList<&Cell>> for PathBuf {
 
 /// A file system mount point.
 ///
-/// All mount points reside within the root directory of a ship (i.e. the pier directory).
+/// A mount point consists of the current working directory of the driver and the mount point name,
+/// which means that a mount point is simply an absolute path.
 struct MountPoint(PathBuf);
+
+/// Enables a [`MountPoint`] to be pushed onto a [`std::path::Path`] or [`std::path::PathBuf`].
+impl AsRef<Path> for MountPoint {
+    fn as_ref(&self) -> &Path {
+        self.0.as_ref()
+    }
+}
 
 /// A change to the file system.
 enum Change {
