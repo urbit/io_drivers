@@ -55,6 +55,9 @@ impl TryFrom<Noun> for Request {
 struct UpdateFileSystem {
     /// The mount point to update.
     mount_point: PathComponent,
+
+    /// Changes to apply to the file system.
+    changes: Vec<Change>,
 }
 
 impl TryFrom<&Noun> for UpdateFileSystem {
@@ -65,13 +68,25 @@ impl TryFrom<&Noun> for UpdateFileSystem {
     /// ```text
     /// [<mount_point> <change_list>]
     /// ```
+    ///
+    /// where `<change_list>` is a null-terminated list of changes to make to the file system. See
+    /// [`Change`] for the structure of a single change.
     fn try_from(data: &Noun) -> Result<Self, Self::Error> {
         if let Noun::Cell(data) = &*data {
-            if let Noun::Atom(knot) = &*data.head() {
-                let mount_point = PathComponent::try_from(Knot(knot))?;
-                // data.tail() is `can`, which is a null-terminated list of pairs
-                // each pair appears to [<path within mount point> <file type>]
-                Ok(Self { mount_point })
+            if let Noun::Atom(head) = &*data.head() {
+                let mount_point = PathComponent::try_from(Knot(head))?;
+                if let Noun::Cell(tail) = &*data.tail() {
+                    let mut tail = tail.to_vec();
+                    // Remove null terminator.
+                    tail.pop();
+                    let mut changes = Vec::new();
+                    for change in tail {
+                        changes.push(Change::try_from(&*change)?);
+                    }
+                    Ok(Self { mount_point, changes })
+                } else {
+                    Err(convert::Error::UnexpectedAtom)
+                }
             } else {
                 Err(convert::Error::UnexpectedCell)
             }
