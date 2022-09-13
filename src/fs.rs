@@ -27,6 +27,7 @@ use tokio::{
 
 /// Requests that can be handled by the file system driver.
 enum Request {
+    CommitMountPoint(CommitMountPoint),
     DeleteMountPoint(DeleteMountPoint),
     ScanMountPoints(ScanMountPoints),
     UpdateFileSystem(UpdateFileSystem),
@@ -42,6 +43,7 @@ impl TryFrom<Noun> for Request {
                 // These tag names are terrible, but we unfortunately can't do anything about
                 // it here because they're determined by the kernel.
                 match atom_as_str(tag)? {
+                    "dirk" => Ok(Self::CommitMountPoint(CommitMountPoint::try_from(&*data)?)),
                     "ogre" => Ok(Self::DeleteMountPoint(DeleteMountPoint::try_from(&*data)?)),
                     "hill" => Ok(Self::ScanMountPoints(ScanMountPoints::try_from(&*data)?)),
                     "ergo" => Ok(Self::UpdateFileSystem(UpdateFileSystem::try_from(&*data)?)),
@@ -52,6 +54,33 @@ impl TryFrom<Noun> for Request {
             }
         } else {
             Err(convert::Error::UnexpectedAtom)
+        }
+    }
+}
+
+/// A request to commit a mount point.
+struct CommitMountPoint {
+    /// The mount point to commit.
+    mount_point: MountPoint,
+}
+
+impl TryFrom<&Noun> for CommitMountPoint {
+    type Error = convert::Error;
+
+    /// A properly structured noun is:
+    ///
+    /// ```text
+    /// <mount_point>
+    /// ```
+    ///
+    /// where `<mount_point>` is the name of the mount point.
+    fn try_from(data: &Noun) -> Result<Self, Self::Error> {
+        if let Noun::Atom(data) = &*data {
+            let mount_point = MountPoint::new(PathComponent::try_from(Knot(data))?)
+                .map_err(|_err| convert::Error::ImplType)?;
+            Ok(Self { mount_point })
+        } else {
+            Err(convert::Error::UnexpectedCell)
         }
     }
 }
@@ -175,6 +204,11 @@ impl TryFrom<&Noun> for UpdateFileSystem {
 pub struct FileSystem;
 
 impl FileSystem {
+    /// Handles a [`CommitMountPoint`] request.
+    fn commit_mount_point(&self, _req: CommitMountPoint, _output_tx: Sender<Noun>) {
+        todo!()
+    }
+
     /// Handles a [`DeleteMountPoint`] request.
     fn delete_mount_point(&self, req: DeleteMountPoint) {
         // TODO: better error handling
@@ -225,11 +259,14 @@ macro_rules! impl_driver {
             fn handle_requests(
                 self,
                 mut input_rx: Receiver<Noun>,
-                _output_tx: Sender<Noun>,
+                output_tx: Sender<Noun>,
             ) -> JoinHandle<Status> {
                 let task = tokio::spawn(async move {
                     while let Some(req) = input_rx.recv().await {
                         match Request::try_from(req) {
+                            Ok(Request::CommitMountPoint(req)) => {
+                                self.commit_mount_point(req, output_tx.clone())
+                            }
                             Ok(Request::DeleteMountPoint(req)) => self.delete_mount_point(req),
                             Ok(Request::ScanMountPoints(req)) => self.scan_mount_points(req),
                             Ok(Request::UpdateFileSystem(req)) => self.update_file_system(req),
