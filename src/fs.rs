@@ -298,6 +298,88 @@ impl<'a> TryFrom<&'a Noun> for Knot<&'a Atom> {
     }
 }
 
+/// A  list of [`Knot`]s.
+///
+/// A list of [`Knot`]s can take three forms:
+/// - an empty list, which is interpreted as an empty file system path;
+/// - a list of length 1, which is interpreted as the file system path `<file_name>`; or
+/// - a list of length more than 1, which is interpreted as the file system path
+///   `.../<file_name>.<file_extension>`.
+///
+/// Note that in the third case, `...` represents zero or more directory names and that the last two
+/// elements of the list are the file name and file extension.
+struct KnotList<A: Atomish>(Vec<Knot<A>>);
+
+impl<'a> TryFrom<&'a Noun> for KnotList<&'a Atom> {
+    type Error = convert::Error;
+
+    fn try_from(noun: &'a Noun) -> Result<Self, Self::Error> {
+        match noun {
+            Noun::Atom(atom) => {
+                if atom.is_null() {
+                    Ok(Self(Vec::new()))
+                } else {
+                    Err(convert::Error::UnexpectedAtom)
+                }
+            }
+            mut noun => {
+                let mut knots = Vec::new();
+                while let Noun::Cell(cell) = &*noun {
+                    knots.push(Knot::try_from(cell.head_ref())?);
+                    noun = cell.tail_ref();
+                }
+                // The list of knots should be null-terminated.
+                if noun.is_null() {
+                    Ok(Self(knots))
+                } else {
+                    Err(convert::Error::ImplType)
+                }
+            }
+        }
+    }
+}
+
+impl TryFrom<KnotList<&Atom>> for PathBuf {
+    type Error = convert::Error;
+
+    fn try_from(knots: KnotList<&Atom>) -> Result<Self, Self::Error> {
+        match knots.0.len() {
+            0 => Ok(PathBuf::new()),
+            1 => {
+                let mut path = PathBuf::new();
+                // There's only a single knot, but this syntax for taking ownership of `knot` is
+                // cleaner than alternatives.
+                for knot in knots.0 {
+                    path.push(PathComponent::try_from(knot)?);
+                }
+                Ok(path)
+            }
+            n => {
+                let mut path = PathBuf::new();
+                let mut file_name = None;
+                for (i, knot) in knots.0.into_iter().enumerate() {
+                    match i {
+                        // `knot` is the file name.
+                        m if m == n - 2 => {
+                            file_name = Some(PathComponent::try_from(knot)?);
+                        }
+                        // `knot` is the file extension.
+                        m if m == n - 1 => {
+                            let file_extension = PathComponent::try_from(knot)?;
+                            path.push(format!("{}.{}", file_name.take().unwrap(), file_extension));
+                        }
+                        // `knot` is a directory name.
+                        _ => {
+                            path.push(PathComponent::try_from(knot)?);
+                        }
+                    }
+                }
+                Ok(path)
+            }
+        }
+    }
+}
+
 //==================================================================================================
 // File System Entries
 //==================================================================================================
@@ -400,25 +482,26 @@ enum Change {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use noun::{atom, cell};
 
     #[test]
     fn convert_knot() {
         macro_rules! test {
             // Knot -> PathComponent: expect success.
-            (knot: $knot:literal, path_component: $path_component:literal) => {
+            (Knot: $knot:literal, PathComponent: $path_component:literal) => {
                 let atom = Atom::from($knot);
                 let knot = Knot(&atom);
-                let path_component = PathComponent::try_from(knot).expect("knot to path component");
+                let path_component = PathComponent::try_from(knot).expect("Knot to PathComponent");
                 assert_eq!(path_component.0, $path_component);
             };
             // Knot -> PathComponent: expect failure.
-            (knot: $knot:expr) => {
+            (Knot: $knot:expr) => {
                 let atom = Atom::from($knot);
                 let knot = Knot(&atom);
                 assert!(PathComponent::try_from(knot).is_err());
             };
             // PathComponent -> Knot: expect success.
-            (path_component: $path_component:literal, knot: $knot:literal) => {
+            (PathComponent: $path_component:literal, Knot: $knot:literal) => {
                 let path_component = PathComponent(String::from($path_component));
                 assert_eq!(Knot::from(path_component).0, $knot);
             };
@@ -426,31 +509,141 @@ mod tests {
 
         {
             // Knot -> PathComponent: expect success.
-            test!(knot: "hello", path_component: "hello");
-            test!(knot: "goodbye!", path_component: "goodbye!");
-            test!(knot: "", path_component: "!");
-            test!(knot: ".", path_component: "!.");
-            test!(knot: "..", path_component: "!..");
-            test!(knot: "!", path_component: "!!");
-            test!(knot: "!water-bottle", path_component: "!!water-bottle");
+            test!(Knot: "hello", PathComponent: "hello");
+            test!(Knot: "goodbye!", PathComponent: "goodbye!");
+            test!(Knot: "", PathComponent: "!");
+            test!(Knot: ".", PathComponent: "!.");
+            test!(Knot: "..", PathComponent: "!..");
+            test!(Knot: "!", PathComponent: "!!");
+            test!(Knot: "!water-bottle", PathComponent: "!!water-bottle");
         }
 
         {
             // Knot -> PathComponent: expect failure.
-            test!(knot: "this has spaces in it");
-            test!(knot: format!("{}at-the-beginning", path::MAIN_SEPARATOR));
-            test!(knot: format!("at-the-end{}", path::MAIN_SEPARATOR));
-            test!(knot: format!("in{}between", path::MAIN_SEPARATOR));
+            test!(Knot: "this has spaces in it");
+            test!(Knot: format!("{}at-the-beginning", path::MAIN_SEPARATOR));
+            test!(Knot: format!("at-the-end{}", path::MAIN_SEPARATOR));
+            test!(Knot: format!("in{}between", path::MAIN_SEPARATOR));
         }
 
         {
             // PathComponent -> Knot: expect success.
-            test!(path_component: "goodbye", knot: "goodbye");
-            test!(path_component: "a_little_longer", knot: "a_little_longer");
-            test!(path_component: "!", knot: "");
-            test!(path_component: "!.", knot: ".");
-            test!(path_component: "!..", knot: "..");
-            test!(path_component: "!!double-down", knot: "!double-down");
+            test!(PathComponent: "goodbye", Knot: "goodbye");
+            test!(PathComponent: "a_little_longer", Knot: "a_little_longer");
+            test!(PathComponent: "!", Knot: "");
+            test!(PathComponent: "!.", Knot: ".");
+            test!(PathComponent: "!..", Knot: "..");
+            test!(PathComponent: "!!double-down", Knot: "!double-down");
+        }
+    }
+
+    #[test]
+    fn convert_knot_list() {
+        macro_rules! test {
+            // Noun -> KnotList -> PathBuf: expect success.
+            (Noun: $noun:expr, PathBuf: $path:literal) => {
+                let knots = KnotList::try_from(&$noun).expect("Noun to KnotList");
+                let path = PathBuf::try_from(knots).expect("KnotList to PathBuf");
+                assert_eq!(path, Path::new($path));
+            };
+            // Noun -> KnotList: expect failure.
+            (Noun: $noun:expr, KnotList) => {
+                assert!(KnotList::try_from(&$noun).is_err());
+            };
+            // Noun -> KnotList -> PathBuf: expect failure.
+            (Noun: $noun:expr, PathBuf) => {
+                let knots = KnotList::try_from(&$noun).expect("Noun to KnotList");
+                assert!(PathBuf::try_from(knots).is_err());
+            };
+        }
+
+        // Noun -> KnotList -> PathBuf: expect success.
+        {
+            {
+                let noun = Noun::from(atom!());
+                test!(Noun: noun, PathBuf: "");
+            }
+
+            {
+                let noun = Noun::from(cell![atom!("only-a-single-component"), atom!(),]);
+                test!(Noun: noun, PathBuf: "only-a-single-component");
+            }
+
+            {
+                let noun = Noun::from(cell![atom!("fs"), atom!("rs"), atom!()]);
+                test!(Noun: noun, PathBuf: "fs.rs");
+            }
+
+            {
+                let noun = Noun::from(cell![
+                    atom!("this"),
+                    atom!("is"),
+                    atom!("a"),
+                    atom!("path"),
+                    atom!("file"),
+                    atom!("extension"),
+                    atom!(),
+                ]);
+                test!(Noun: noun, PathBuf: "this/is/a/path/file.extension");
+            }
+
+            {
+                let noun = Noun::from(cell![atom!(""), atom!()]);
+                test!(Noun: noun, PathBuf: "!");
+            }
+
+            {
+                let noun = Noun::from(cell![atom!("."), atom!()]);
+                test!(Noun: noun, PathBuf: "!.");
+            }
+
+            {
+                let noun = Noun::from(cell![atom!(".."), atom!()]);
+                test!(Noun: noun, PathBuf: "!..");
+            }
+
+            {
+                let noun = Noun::from(cell![atom!("!"), atom!()]);
+                test!(Noun: noun, PathBuf: "!!");
+            }
+
+            {
+                let noun = Noun::from(cell![atom!("!escaped"), atom!()]);
+                test!(Noun: noun, PathBuf: "!!escaped");
+            }
+
+            {
+                let noun = Noun::from(cell![
+                    atom!(".."),
+                    atom!("."),
+                    atom!(""),
+                    atom!("!file"),
+                    atom!("!extension"),
+                    atom!()
+                ]);
+                test!(Noun: noun, PathBuf: "!../!./!/!!file.!!extension");
+            }
+        }
+
+        // Noun -> KnotList: expect failure.
+        {
+            {
+                let noun = Noun::from(atom!(107u8));
+                test!(Noun: noun, KnotList);
+            }
+
+            {
+                let noun = Noun::from(cell!["missing", "null", "terminator"]);
+                test!(Noun: noun, KnotList);
+            }
+        }
+
+        // Noun -> KnotList -> PathBuf: expect failure.
+        {
+            {
+                let noun = Noun::from(cell![atom!("has a space"), atom!()]);
+                test!(Noun: noun, PathBuf);
+            }
         }
     }
 }
