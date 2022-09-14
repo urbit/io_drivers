@@ -1,13 +1,14 @@
 #![allow(dead_code)]
 
+use crate::atom_as_str;
 use log::{info, warn};
-use noun::{cell::Cell, Noun};
+use noun::{atom::Atom, cell::Cell, convert, marker::Atomish, Noun};
 use std::{
     collections::{hash_map::DefaultHasher, HashMap},
     env, fmt, fs,
     hash::Hasher,
     io,
-    path::{Path, PathBuf},
+    path::{self, Path, PathBuf},
 };
 use tokio::sync::mpsc::Sender;
 
@@ -216,6 +217,19 @@ impl FileSystem {
 //==================================================================================================
 
 /// A single component of a file system path.
+///
+/// A [`PathComponent`] must only be created by converting a [`Knot`] with `try_from()`, which
+/// ensures that [`Knot`]s that cause issues as file system paths are properly escaped. As a result
+/// of this requirement, a [`PathComponent`] is guaranteed to never be:
+/// - the empty string,
+/// - `.`,
+/// - `..`, or
+/// - `!<some_chars>`
+/// because each is escaped to yield (respectively):
+/// - `!`,
+/// - `!.`,
+/// - `!..`, and
+/// - `!!<some_chars>`.
 #[derive(Eq, Hash, PartialEq)]
 struct PathComponent(String);
 
@@ -229,6 +243,58 @@ impl AsRef<Path> for PathComponent {
 impl fmt::Display for PathComponent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "{}", self.0)
+    }
+}
+
+impl TryFrom<Knot<&Atom>> for PathComponent {
+    type Error = convert::Error;
+
+    fn try_from(knot: Knot<&Atom>) -> Result<Self, Self::Error> {
+        let knot = atom_as_str(knot.0)?;
+        // A path component should not have spaces or path separators in it.
+        if !knot.contains(" ") && !knot.contains(path::MAIN_SEPARATOR) {
+            if knot.is_empty() || knot == "." || knot == ".." || knot.starts_with("!") {
+                Ok(Self(format!("!{}", knot)))
+            } else {
+                Ok(Self(String::from(knot)))
+            }
+        } else {
+            Err(convert::Error::ImplType)
+        }
+    }
+}
+
+/// A Hoon `$knot`.
+///
+/// A `$knot` is simply an ASCII string.
+struct Knot<A: Atomish>(A);
+
+impl From<PathComponent> for Knot<Atom> {
+    fn from(path_component: PathComponent) -> Self {
+        debug_assert!(!path_component.0.contains(path::MAIN_SEPARATOR));
+
+        let knot = if path_component.0.chars().nth(0) == Some('!') {
+            &path_component.0[1..]
+        } else {
+            &path_component.0[..]
+        };
+        Knot(Atom::from(knot))
+    }
+}
+
+impl<'a> TryFrom<&'a Noun> for Knot<&'a Atom> {
+    type Error = convert::Error;
+
+    fn try_from(noun: &'a Noun) -> Result<Self, Self::Error> {
+        if let Noun::Atom(atom) = noun {
+            if atom_as_str(atom)?.is_ascii() {
+                Ok(Self(atom))
+            } else {
+                Err(convert::Error::ImplType)
+            }
+        } else {
+            Err(convert::Error::UnexpectedCell)
+        }
     }
 }
 
@@ -329,4 +395,62 @@ enum Change {
         /// Mount-point-relative path to the file.
         path: PathBuf,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn convert_knot() {
+        macro_rules! test {
+            // Knot -> PathComponent: expect success.
+            (knot: $knot:literal, path_component: $path_component:literal) => {
+                let atom = Atom::from($knot);
+                let knot = Knot(&atom);
+                let path_component = PathComponent::try_from(knot).expect("knot to path component");
+                assert_eq!(path_component.0, $path_component);
+            };
+            // Knot -> PathComponent: expect failure.
+            (knot: $knot:expr) => {
+                let atom = Atom::from($knot);
+                let knot = Knot(&atom);
+                assert!(PathComponent::try_from(knot).is_err());
+            };
+            // PathComponent -> Knot: expect success.
+            (path_component: $path_component:literal, knot: $knot:literal) => {
+                let path_component = PathComponent(String::from($path_component));
+                assert_eq!(Knot::from(path_component).0, $knot);
+            };
+        }
+
+        {
+            // Knot -> PathComponent: expect success.
+            test!(knot: "hello", path_component: "hello");
+            test!(knot: "goodbye!", path_component: "goodbye!");
+            test!(knot: "", path_component: "!");
+            test!(knot: ".", path_component: "!.");
+            test!(knot: "..", path_component: "!..");
+            test!(knot: "!", path_component: "!!");
+            test!(knot: "!water-bottle", path_component: "!!water-bottle");
+        }
+
+        {
+            // Knot -> PathComponent: expect failure.
+            test!(knot: "this has spaces in it");
+            test!(knot: format!("{}at-the-beginning", path::MAIN_SEPARATOR));
+            test!(knot: format!("at-the-end{}", path::MAIN_SEPARATOR));
+            test!(knot: format!("in{}between", path::MAIN_SEPARATOR));
+        }
+
+        {
+            // PathComponent -> Knot: expect success.
+            test!(path_component: "goodbye", knot: "goodbye");
+            test!(path_component: "a_little_longer", knot: "a_little_longer");
+            test!(path_component: "!", knot: "");
+            test!(path_component: "!.", knot: ".");
+            test!(path_component: "!..", knot: "..");
+            test!(path_component: "!!double-down", knot: "!double-down");
+        }
+    }
 }
