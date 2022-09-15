@@ -31,7 +31,7 @@ macro_rules! impl_try_from_noun {
     // ```
     //
     // where `<mount_point>` is a mount point name.
-    ($type:ty, mount_point) => {
+    ($type:ty { mount_point }) => {
         impl TryFrom<&Noun> for $type {
             type Error = convert::Error;
 
@@ -50,7 +50,7 @@ macro_rules! impl_try_from_noun {
     // ```
     //
     // where `<mount_point_list>` is a null-terminated list of mount point names.
-    ($type:ty, mount_points) => {
+    ($type:ty { mount_points }) => {
         impl TryFrom<&Noun> for $type {
             type Error = convert::Error;
             fn try_from(data: &Noun) -> Result<Self, Self::Error> {
@@ -71,7 +71,7 @@ struct CommitMountPoint {
     mount_point: PathComponent,
 }
 
-impl_try_from_noun!(CommitMountPoint, mount_point);
+impl_try_from_noun!(CommitMountPoint { mount_point });
 
 /// A request to delete a mount point.
 struct DeleteMountPoint {
@@ -79,7 +79,7 @@ struct DeleteMountPoint {
     mount_point: PathComponent,
 }
 
-impl_try_from_noun!(DeleteMountPoint, mount_point);
+impl_try_from_noun!(DeleteMountPoint { mount_point });
 
 /// A request to scan a list of mount points.
 struct ScanMountPoints {
@@ -87,7 +87,7 @@ struct ScanMountPoints {
     mount_points: Vec<PathComponent>,
 }
 
-impl_try_from_noun!(ScanMountPoints, mount_points);
+impl_try_from_noun!(ScanMountPoints { mount_points });
 
 /// A request to update the file system from a list of changes.
 struct UpdateFileSystem {
