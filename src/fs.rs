@@ -22,16 +22,16 @@ enum Request {
     ScanMountPoints(ScanMountPoints),
 }
 
-/// Implements `TryFrom<&Noun>` for a struct with a single field named `mount_point` of type
-/// `PathComponent`. A properly structured noun is:
-///
-/// ```text
-/// <mount_point>
-/// ```
-///
-/// where `<mount_point>` is the name of a mount point.
 macro_rules! impl_try_from_noun {
-    ($type:ty, $field:ident) => {
+    // Implements `TryFrom<&Noun>` for a struct with a single field named `mount_point` of type
+    // `PathComponent`. A properly structured noun is:
+    //
+    // ```text
+    // <mount_point>
+    // ```
+    //
+    // where `<mount_point>` is a mount point name.
+    ($type:ty, mount_point) => {
         impl TryFrom<&Noun> for $type {
             type Error = convert::Error;
 
@@ -39,6 +39,27 @@ macro_rules! impl_try_from_noun {
                 let knot = Knot::try_from(data)?;
                 let mount_point = PathComponent::try_from(knot)?;
                 Ok(Self { mount_point })
+            }
+        }
+    };
+    // Implements `TryFrom<&Noun>` for a struct with a single field named `mount_points` of type
+    // `Vec<PathComponent>`. A properly structured noun is:
+    //
+    // ```text
+    // <mount_point_list>
+    // ```
+    //
+    // where `<mount_point_list>` is a null-terminated list of mount point names.
+    ($type:ty, mount_points) => {
+        impl TryFrom<&Noun> for $type {
+            type Error = convert::Error;
+            fn try_from(data: &Noun) -> Result<Self, Self::Error> {
+                let knots = KnotList::try_from(data)?;
+                let mut mount_points = Vec::new();
+                for knot in knots.0 {
+                    mount_points.push(PathComponent::try_from(knot)?);
+                }
+                Ok(Self { mount_points })
             }
         }
     };
@@ -65,6 +86,8 @@ struct ScanMountPoints {
     /// The names of the mount points to scan.
     mount_points: Vec<PathComponent>,
 }
+
+impl_try_from_noun!(ScanMountPoints, mount_points);
 
 /// A request to update the file system from a list of changes.
 struct UpdateFileSystem {
@@ -520,7 +543,7 @@ mod tests {
                     assert_eq!(
                         req.mount_point,
                         PathComponent(String::from($path_component))
-                        );
+                    );
                 };
                 // Noun -> $type: expect failure.
                 (Noun: $noun:expr) => {
@@ -716,6 +739,51 @@ mod tests {
             {
                 let noun = Noun::from(cell![atom!("has a space"), atom!()]);
                 test!(Noun: noun, PathBuf);
+            }
+        }
+    }
+
+    #[test]
+    fn convert_scan_mount_points() {
+        macro_rules! test {
+            // Noun -> ScanMountPoints: expect success.
+            (Noun: $noun:expr, Vec<PathComponent>: $path_components:expr) => {
+                let noun = Noun::from($noun);
+                let req = ScanMountPoints::try_from(&noun).expect("Noun to ScanMountPoints");
+                assert_eq!(req.mount_points, $path_components);
+            };
+            // Noun -> ScanMountPoints: expect failure.
+            (Noun: $noun:expr) => {
+                let noun = Noun::from($noun);
+                assert!(ScanMountPoints::try_from(&noun).is_err());
+            };
+        }
+
+        // Noun -> ScanMountPoints: expect success.
+        {
+            test!(Noun: atom!(), Vec<PathComponent>: vec![]);
+
+            {
+                let cell = cell![atom!("a"), atom!("b"), atom!("c"), atom!()];
+                let path_components = vec![
+                    PathComponent(String::from("a")),
+                    PathComponent(String::from("b")),
+                    PathComponent(String::from("c")),
+                ];
+                test!(Noun: cell, Vec<PathComponent>: path_components);
+            }
+        }
+
+        // Noun -> ScanMountPoints: expect failure.
+        {
+            {
+                let cell = cell![Noun::from(cell!["unexpected", "cell"]), Noun::from(atom!())];
+                test!(Noun: cell);
+            }
+
+            {
+                let cell = cell![atom!("missing"), atom!("null"), atom!("terminator")];
+                test!(Noun: cell);
             }
         }
     }
