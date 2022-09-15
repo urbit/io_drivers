@@ -22,6 +22,8 @@ enum Request {
     ScanMountPoints(ScanMountPoints),
 }
 
+/// Implements `TryFrom<&Noun>` for a struct consisting of a single field `mount_point` of type
+/// [`PathComponent`] or `mount_points` of type [`Vec<PathComponent>`].
 macro_rules! impl_try_from_noun {
     // Implements `TryFrom<&Noun>` for a struct with a single field named `mount_point` of type
     // `PathComponent`. A properly structured noun is:
