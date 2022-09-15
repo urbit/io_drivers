@@ -98,6 +98,33 @@ struct UpdateFileSystem {
     changes: Vec<Change>,
 }
 
+impl TryFrom<&Noun> for UpdateFileSystem {
+    type Error = convert::Error;
+
+    /// A properly structured noun is:
+    ///
+    /// ```text
+    /// [<mount_point> <change_list>]
+    /// ```
+    ///
+    /// where `<mount_point>` is the name of the mount point and `<change_list>` is a
+    /// null-terminated list of changes to make to the file system. See [`Change`] for the
+    /// structure of a single change.
+    fn try_from(data: &Noun) -> Result<Self, Self::Error> {
+        if let Noun::Cell(data) = data {
+            let knot = Knot::try_from(data.head_ref())?;
+            let mount_point = PathComponent::try_from(knot)?;
+            let changes = ChangeList::try_from(data.tail_ref())?.0;
+            Ok(Self {
+                mount_point,
+                changes,
+            })
+        } else {
+            Err(convert::Error::UnexpectedAtom)
+        }
+    }
+}
+
 //==================================================================================================
 // Driver
 //==================================================================================================
@@ -511,6 +538,7 @@ impl From<&[u8]> for Hash {
 }
 
 /// A change to the file system.
+#[derive(Debug, Eq, PartialEq)]
 enum Change {
     /// A change that edits a file in place.
     EditFile {
@@ -526,6 +554,99 @@ enum Change {
         /// Mount-point-relative path to the file.
         path: PathBuf,
     },
+}
+
+impl TryFrom<&Noun> for Change {
+    type Error = convert::Error;
+
+    /// A properly structured noun is one of:
+    ///
+    /// ```text
+    /// [<path_list> 0]
+    /// [<path_list> 0 <file_type_list> <byte_count> <bytes>]
+    /// ```
+    ///
+    /// The former structure removes a file at `<path_list>`, whereas the latter structure edits a
+    /// file of type `<file_type_list>` at `<path_list>`, replacing the previous file contents with
+    /// `<bytes>`.
+    ///
+    /// `<path_list>` is a null-terminated list identifying the mount-point-relative path to a
+    /// file.
+    ///
+    /// As a concrete example, writing `|=  a=@  +(a)` (a 13-byte change) to
+    /// `<pier>/base/gen/example.hoon` yields:
+    ///
+    /// ```text
+    /// [
+    ///     [%gen %example %hoon 0]
+    ///     0
+    ///     [%text %x-hoon 0]
+    ///     14
+    ///     0xa2961282b2020403d6120203d7c
+    /// ]
+    /// ```
+    ///
+    /// Note that `14` is the length of the chnage to `example.hoon` plus one (for the record
+    /// separator i.e. ASCII `30`) and `0xa2961282b2020403d6120203d7c` is `|=  a=@  +(a)<RS>`
+    /// represented as an atom (where `<RS>` is the record separator).
+    ///
+    /// Removing `<pier>/base/gen/example.hoon` yields:
+    ///
+    /// ```text
+    /// [
+    ///     [%gen %example %hoon 0]
+    ///     0
+    /// ]
+    /// ```
+    fn try_from(noun: &Noun) -> Result<Self, Self::Error> {
+        if let Noun::Cell(noun) = noun {
+            let path = PathBuf::try_from(KnotList::try_from(noun.head_ref())?)?;
+            match noun.tail_ref() {
+                Noun::Atom(tail) => {
+                    if tail.is_null() {
+                        Ok(Self::RemoveFile { path })
+                    } else {
+                        Err(convert::Error::ExpectedNull)
+                    }
+                }
+                Noun::Cell(tail) => {
+                    let [null, _file_type_list, byte_len, bytes] =
+                        tail.to_array::<4>().ok_or(convert::Error::ImplType)?;
+                    if null.is_null() {
+                        if let Noun::Atom(byte_len) = &*byte_len {
+                            if let Noun::Atom(bytes) = &*bytes {
+                                let bytes = bytes.to_vec();
+                                debug_assert_eq!(
+                                    byte_len.as_usize().expect("Atom to usize"),
+                                    bytes.len()
+                                );
+                                Ok(Self::EditFile { path, bytes })
+                            } else {
+                                Err(convert::Error::UnexpectedCell)
+                            }
+                        } else {
+                            Err(convert::Error::UnexpectedCell)
+                        }
+                    } else {
+                        Err(convert::Error::ExpectedNull)
+                    }
+                }
+            }
+        } else {
+            Err(convert::Error::UnexpectedAtom)
+        }
+    }
+}
+
+/// A list of changes to the file system.
+struct ChangeList(Vec<Change>);
+
+impl TryFrom<&Noun> for ChangeList {
+    type Error = convert::Error;
+
+    fn try_from(noun: &Noun) -> Result<Self, Self::Error> {
+        Ok(Self(convert!(noun => Vec<Change>)?))
+    }
 }
 
 #[cfg(test)]
@@ -568,6 +689,54 @@ mod tests {
                 test!(Noun: cell![atom!("mount-point"), atom!()]);
             }
         };
+    }
+
+    #[test]
+    fn convert_change() {
+        // Noun -> Change: expect success.
+        {
+            {
+                let noun = Noun::from(cell![
+                    Noun::from(cell![
+                        atom!("gen"),
+                        atom!("example"),
+                        atom!("hoon"),
+                        atom!()
+                    ]),
+                    Noun::null(),
+                ]);
+                let change = Change::try_from(&noun).expect("Noun to Change");
+                assert_eq!(
+                    change,
+                    Change::RemoveFile {
+                        path: PathBuf::from("gen/example.hoon")
+                    }
+                );
+            }
+
+            {
+                let noun = Noun::from(cell![
+                    Noun::from(cell![
+                        atom!("gen"),
+                        atom!("example"),
+                        atom!("hoon"),
+                        atom!()
+                    ]),
+                    Noun::null(),
+                    Noun::from(cell![atom!("text"), atom!("x-hoon"), atom!(),]),
+                    Noun::from(atom!(14u8)),
+                    Noun::from(atom!(0xa2961282b2020403d6120203d7cu128)),
+                ]);
+                let change = Change::try_from(&noun).expect("Noun to Change");
+                assert_eq!(
+                    change,
+                    Change::EditFile {
+                        path: PathBuf::from("gen/example.hoon"),
+                        bytes: atom!(0xa2961282b2020403d6120203d7cu128).into_vec(),
+                    }
+                );
+            }
+        }
     }
 
     #[test]
@@ -784,6 +953,46 @@ mod tests {
             {
                 let cell = cell![atom!("missing"), atom!("null"), atom!("terminator")];
                 test!(Noun: cell);
+            }
+        }
+    }
+
+    #[test]
+    fn convert_update_file_system() {
+        // Noun -> UpdateFileSystem: expect success.
+        {
+            {
+                let noun = Noun::from(cell![
+                    Noun::from(atom!("mount-point")),
+                    Noun::from(cell![
+                        Noun::from(cell![atom!("gen"), atom!("foo"), atom!("hoon"), atom!(),]),
+                        Noun::null(),
+                    ]),
+                    Noun::from(cell![
+                        Noun::from(cell![atom!("gen"), atom!("bar"), atom!("hoon"), atom!()]),
+                        Noun::null(),
+                        Noun::from(cell![atom!("text"), atom!("x-hoon"), atom!(),]),
+                        Noun::from(atom!(14u8)),
+                        Noun::from(atom!(0xa2961282b2020403d6120203d7cu128)),
+                    ]),
+                    Noun::null(),
+                ]);
+                let req = UpdateFileSystem::try_from(&noun).expect("Noun to UpdateFileSystem");
+                assert_eq!(req.mount_point, PathComponent(String::from("mount-point")));
+                assert_eq!(req.changes.len(), 2);
+                assert_eq!(
+                    req.changes[0],
+                    Change::RemoveFile {
+                        path: PathBuf::from("gen/foo.hoon")
+                    }
+                );
+                assert_eq!(
+                    req.changes[1],
+                    Change::EditFile {
+                        path: PathBuf::from("gen/bar.hoon"),
+                        bytes: atom!(0xa2961282b2020403d6120203d7cu128).into_vec()
+                    }
+                );
             }
         }
     }
