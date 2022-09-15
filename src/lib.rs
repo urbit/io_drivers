@@ -1,3 +1,73 @@
+/// Implements `TryFrom<&Noun>` for the request enum of a driver, which enumerates all of the
+/// different types of requests that driver may handle, with minimal boilerplate. A properly
+/// structured noun is:
+///
+/// ```text
+/// [<tag> <data>]
+/// ```
+///
+/// where `<tag>` is a string identifying the type of request, and `<data>` is the data associated
+/// with that request.
+///
+/// This macro takes the name of the request enum and one or more match arms that map from a
+/// `<tag>` to the type of request that the `<tag>` represents.
+///
+/// # Examples
+///
+/// ```ignore
+/// enum Request {
+///     A(A),
+///     B(B),
+///     C(C),
+/// }
+///
+/// impl_try_from_noun_for_request!(
+///     Request,
+///     "a-tag" => A,
+///     "b-tag" => B,
+///     "c-tag" => C,
+/// );
+///
+/// struct A;
+///
+/// impl TryFrom<&Noun> for A { unimplemented!() }
+///
+/// struct B;
+///
+/// impl TryFrom<&Noun> for B { unimplemented!() }
+///
+/// struct C;
+///
+/// impl TryFrom<&Noun> for C { unimplemented!() }
+/// ```
+#[macro_export]
+macro_rules! impl_try_from_noun_for_request {
+    ($request_enum:ty, $($pattern:pat => $request_struct:ident),+ $(,)?) => {
+        impl TryFrom<noun::Noun> for $request_enum {
+            type Error = noun::convert::Error;
+
+            fn try_from(req: Noun) -> Result<Self, Self::Error> {
+                if let noun::Noun::Cell(req) = req {
+                    let (tag, data) = req.into_parts();
+                    if let noun::Noun::Atom(tag) = &*tag {
+                        match $crate::atom_as_str(tag)? {
+                            $(
+                                $pattern => Ok(Self::$request_struct($request_struct::try_from(&*data)?)),
+                            )+
+                            _ => Err(noun::convert::Error::ImplType),
+                        }
+                    } else {
+                        Err(noun::convert::Error::UnexpectedCell)
+                    }
+                } else {
+                    Err(noun::convert::Error::UnexpectedAtom)
+                }
+            }
+        }
+
+    };
+}
+
 #[cfg(feature = "file-system")]
 pub mod fs;
 #[cfg(feature = "http-client")]
@@ -284,6 +354,6 @@ where
 /// Converts an atom into a string, returning a `convert::Error` if the operation failed.
 ///
 /// This function exists purely for convenience.
-fn atom_as_str(atom: &Atom) -> Result<&str, convert::Error> {
+pub fn atom_as_str(atom: &Atom) -> Result<&str, convert::Error> {
     atom.as_str().map_err(|_| convert::Error::AtomToStr)
 }
