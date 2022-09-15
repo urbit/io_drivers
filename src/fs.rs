@@ -18,8 +18,8 @@ use tokio::sync::mpsc::Sender;
 
 /// Requests that can be handled by the file system driver.
 enum Request {
-    DeleteMountPoint(DeleteMountPoint),
-    ScanMountPoints(ScanMountPoints),
+    DeleteMountPoint(DeleteMountPointRequest),
+    ScanMountPoints(ScanMountPointsRequest),
 }
 
 /// Implements `TryFrom<&Noun>` for a struct consisting of a single field `mount_point` of type
@@ -68,31 +68,31 @@ macro_rules! impl_try_from_noun {
 }
 
 /// A request to commit a mount point.
-struct CommitMountPoint {
+struct CommitMountPointRequest {
     /// The name of the mount point to commit.
     mount_point: PathComponent,
 }
 
-impl_try_from_noun!(CommitMountPoint { mount_point });
+impl_try_from_noun!(CommitMountPointRequest { mount_point });
 
 /// A request to delete a mount point.
-struct DeleteMountPoint {
+struct DeleteMountPointRequest {
     /// The name of the mount point to delete.
     mount_point: PathComponent,
 }
 
-impl_try_from_noun!(DeleteMountPoint { mount_point });
+impl_try_from_noun!(DeleteMountPointRequest { mount_point });
 
 /// A request to scan a list of mount points.
-struct ScanMountPoints {
+struct ScanMountPointsRequest {
     /// The names of the mount points to scan.
     mount_points: Vec<PathComponent>,
 }
 
-impl_try_from_noun!(ScanMountPoints { mount_points });
+impl_try_from_noun!(ScanMountPointsRequest { mount_points });
 
 /// A request to update the file system from a list of changes.
-struct UpdateFileSystem {
+struct UpdateFileSystemRequest {
     /// The name of the mount point to update.
     mount_point: PathComponent,
 
@@ -100,7 +100,7 @@ struct UpdateFileSystem {
     changes: Vec<Change>,
 }
 
-impl TryFrom<&Noun> for UpdateFileSystem {
+impl TryFrom<&Noun> for UpdateFileSystemRequest {
     type Error = convert::Error;
 
     /// A properly structured noun is:
@@ -142,8 +142,8 @@ impl FileSystem {
         "file-system"
     }
 
-    /// Handles a [`CommitMountPoint`] request.
-    fn commit_mount_point(&mut self, req: CommitMountPoint, _output_tx: Sender<Noun>) {
+    /// Handles a [`CommitMountPointRequest`] request.
+    fn commit_mount_point(&mut self, req: CommitMountPointRequest, _output_tx: Sender<Noun>) {
         if let Some(mount_point) = self.mount_points.remove(&req.mount_point) {
             match mount_point.scan() {
                 Ok((mount_point, old_entries)) => {
@@ -197,8 +197,8 @@ impl FileSystem {
         }
     }
 
-    /// Handles a [`DeleteMountPoint`] request.
-    fn delete_mount_point(&mut self, req: DeleteMountPoint) {
+    /// Handles a [`DeleteMountPointRequest`] request.
+    fn delete_mount_point(&mut self, req: DeleteMountPointRequest) {
         if let Some(mount_point) = self.mount_points.remove(&req.mount_point) {
             let path = &mount_point.path;
             if let Err(err) = fs::remove_dir_all(path) {
@@ -214,8 +214,8 @@ impl FileSystem {
         }
     }
 
-    /// Handles a [`ScanMountPoints`] request.
-    fn scan_mount_points(&mut self, req: ScanMountPoints) {
+    /// Handles a [`ScanMountPointsRequest`] request.
+    fn scan_mount_points(&mut self, req: ScanMountPointsRequest) {
         for name in req.mount_points {
             if let Some(mount_point) = self.mount_points.remove(&name) {
                 match mount_point.scan() {
@@ -241,8 +241,8 @@ impl FileSystem {
         }
     }
 
-    /// Handles an [`UpdateFileSystem`] request.
-    fn update_file_system(&mut self, req: UpdateFileSystem) {
+    /// Handles an [`UpdateFileSystemRequest`] request.
+    fn update_file_system(&mut self, req: UpdateFileSystemRequest) {
         if let Some(mount_point) = self.mount_points.get_mut(&req.mount_point) {
             for change in req.changes {
                 match change {
@@ -742,13 +742,13 @@ mod tests {
     }
 
     #[test]
-    fn convert_commit_mount_point() {
-        test_noun_to_mount_point!(CommitMountPoint);
+    fn convert_commit_mount_point_request() {
+        test_noun_to_mount_point!(CommitMountPointRequest);
     }
 
     #[test]
-    fn convert_delete_mount_point() {
-        test_noun_to_mount_point!(DeleteMountPoint);
+    fn convert_delete_mount_point_request() {
+        test_noun_to_mount_point!(DeleteMountPointRequest);
     }
 
     #[test]
@@ -915,22 +915,23 @@ mod tests {
     }
 
     #[test]
-    fn convert_scan_mount_points() {
+    fn convert_scan_mount_points_request() {
         macro_rules! test {
-            // Noun -> ScanMountPoints: expect success.
+            // Noun -> ScanMountPointsRequest: expect success.
             (Noun: $noun:expr, Vec<PathComponent>: $path_components:expr) => {
                 let noun = Noun::from($noun);
-                let req = ScanMountPoints::try_from(&noun).expect("Noun to ScanMountPoints");
+                let req = ScanMountPointsRequest::try_from(&noun)
+                    .expect("Noun to ScanMountPointsRequest");
                 assert_eq!(req.mount_points, $path_components);
             };
-            // Noun -> ScanMountPoints: expect failure.
+            // Noun -> ScanMountPointsRequest: expect failure.
             (Noun: $noun:expr) => {
                 let noun = Noun::from($noun);
-                assert!(ScanMountPoints::try_from(&noun).is_err());
+                assert!(ScanMountPointsRequest::try_from(&noun).is_err());
             };
         }
 
-        // Noun -> ScanMountPoints: expect success.
+        // Noun -> ScanMountPointsRequest: expect success.
         {
             test!(Noun: atom!(), Vec<PathComponent>: vec![]);
 
@@ -945,7 +946,7 @@ mod tests {
             }
         }
 
-        // Noun -> ScanMountPoints: expect failure.
+        // Noun -> ScanMountPointsRequest: expect failure.
         {
             {
                 let cell = cell![Noun::from(cell!["unexpected", "cell"]), Noun::from(atom!())];
@@ -960,8 +961,8 @@ mod tests {
     }
 
     #[test]
-    fn convert_update_file_system() {
-        // Noun -> UpdateFileSystem: expect success.
+    fn convert_update_file_system_request() {
+        // Noun -> UpdateFileSystemRequest: expect success.
         {
             {
                 let noun = Noun::from(cell![
@@ -979,7 +980,8 @@ mod tests {
                     ]),
                     Noun::null(),
                 ]);
-                let req = UpdateFileSystem::try_from(&noun).expect("Noun to UpdateFileSystem");
+                let req = UpdateFileSystemRequest::try_from(&noun)
+                    .expect("Noun to UpdateFileSystemRequest");
                 assert_eq!(req.mount_point, PathComponent(String::from("mount-point")));
                 assert_eq!(req.changes.len(), 2);
                 assert_eq!(
