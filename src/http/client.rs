@@ -27,26 +27,11 @@ enum Request {
     CancelRequest(CancelRequest),
 }
 
-impl TryFrom<Noun> for Request {
-    type Error = convert::Error;
-
-    fn try_from(req: Noun) -> Result<Self, Self::Error> {
-        if let Noun::Cell(req) = req {
-            let (tag, data) = req.into_parts();
-            if let Noun::Atom(tag) = &*tag {
-                match atom_as_str(tag)? {
-                    "request" => Ok(Self::SendRequest(SendRequest::try_from(&*data)?)),
-                    "cancel-request" => Ok(Self::CancelRequest(CancelRequest::try_from(&*data)?)),
-                    _ => Err(convert::Error::ImplType),
-                }
-            } else {
-                Err(convert::Error::UnexpectedCell)
-            }
-        } else {
-            Err(convert::Error::UnexpectedAtom)
-        }
-    }
-}
+impl_try_from_noun_for_request!(
+    Request,
+    "request" => SendRequest,
+    "cancel-request" => CancelRequest,
+);
 
 /// A request to send an HTTP request.
 #[derive(Debug)]
