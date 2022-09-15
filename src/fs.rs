@@ -18,8 +18,17 @@ use tokio::sync::mpsc::Sender;
 
 /// Requests that can be handled by the file system driver.
 enum Request {
+    /// A request to commit a mount point.
+    CommitMountPoint(CommitMountPointRequest),
+
+    /// A request to delete a mount point.
     DeleteMountPoint(DeleteMountPointRequest),
+
+    /// A request to scan a list of mount points.
     ScanMountPoints(ScanMountPointsRequest),
+
+    /// A request to update the file system from a list of changes.
+    UpdateFileSystem(UpdateFileSystemRequest),
 }
 
 /// Implements `TryFrom<&Noun>` for a struct consisting of a single field `mount_point` of type
