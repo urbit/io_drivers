@@ -22,11 +22,35 @@ enum Request {
     ScanMountPoints(ScanMountPoints),
 }
 
+/// Implements `TryFrom<&Noun>` for a struct with a single field named `mount_point` of type
+/// `PathComponent`. A properly structured noun is:
+///
+/// ```text
+/// <mount_point>
+/// ```
+///
+/// where `<mount_point>` is the name of a mount point.
+macro_rules! impl_try_from_noun {
+    ($type:ty, $field:ident) => {
+        impl TryFrom<&Noun> for $type {
+            type Error = convert::Error;
+
+            fn try_from(data: &Noun) -> Result<Self, Self::Error> {
+                let knot = Knot::try_from(data)?;
+                let mount_point = PathComponent::try_from(knot)?;
+                Ok(Self { mount_point })
+            }
+        }
+    };
+}
+
 /// A request to commit a mount point.
 struct CommitMountPoint {
     /// The name of the mount point to commit.
     mount_point: PathComponent,
 }
+
+impl_try_from_noun!(CommitMountPoint, mount_point);
 
 /// A request to delete a mount point.
 struct DeleteMountPoint {
@@ -230,7 +254,7 @@ impl FileSystem {
 /// - `!.`,
 /// - `!..`, and
 /// - `!!<some_chars>`.
-#[derive(Eq, Hash, PartialEq)]
+#[derive(Debug, Eq, Hash, PartialEq)]
 struct PathComponent(String);
 
 /// Enables a [`PathComponent`] to be pushed onto a [`Path`].
@@ -483,6 +507,42 @@ enum Change {
 mod tests {
     use super::*;
     use noun::{atom, cell};
+
+    #[test]
+    fn convert_commit_mount_point() {
+        macro_rules! test {
+            // Noun -> CommitMountPoint: expect success.
+            (Noun: $atom:expr, PathComponent: $path_component:literal) => {
+                let noun = Noun::from($atom);
+                let req = CommitMountPoint::try_from(&noun).expect("Noun to CommitMountPoint");
+                assert_eq!(
+                    req.mount_point,
+                    PathComponent(String::from($path_component))
+                );
+            };
+            // Noun -> CommitMountPoint: expect failure.
+            (Noun: $noun:expr) => {
+                let noun = Noun::from($noun);
+                assert!(CommitMountPoint::try_from(&noun).is_err());
+            };
+        }
+
+        // Noun -> CommitMountPoint: expect success.
+        {
+            test!(Noun: atom!("mount-point-name"), PathComponent: "mount-point-name");
+            test!(Noun: atom!(""), PathComponent: "!");
+            test!(Noun: atom!("."), PathComponent: "!.");
+            test!(Noun: atom!(".."), PathComponent: "!..");
+            test!(Noun: atom!("!base"), PathComponent: "!!base");
+        }
+
+        // Noun -> CommitMountPoint: expect failure.
+        {
+            test!(Noun: atom!(" "));
+            test!(Noun: atom!(format!("has{}separator", path::MAIN_SEPARATOR)));
+            test!(Noun: cell![atom!("mount-point"), atom!()]);
+        }
+    }
 
     #[test]
     fn convert_knot() {
