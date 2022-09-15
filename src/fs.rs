@@ -58,6 +58,8 @@ struct DeleteMountPoint {
     mount_point: PathComponent,
 }
 
+impl_try_from_noun!(DeleteMountPoint, mount_point);
+
 /// A request to scan a list of mount points.
 struct ScanMountPoints {
     /// The names of the mount points to scan.
@@ -508,40 +510,51 @@ mod tests {
     use super::*;
     use noun::{atom, cell};
 
+    macro_rules! test_noun_to_mount_point {
+        ($type:ty) => {
+            macro_rules! test {
+                // Noun -> $type: expect success.
+                (Noun: $atom:expr, PathComponent: $path_component:literal) => {
+                    let noun = Noun::from($atom);
+                    let req = <$type>::try_from(&noun).expect("Noun to $type");
+                    assert_eq!(
+                        req.mount_point,
+                        PathComponent(String::from($path_component))
+                        );
+                };
+                // Noun -> $type: expect failure.
+                (Noun: $noun:expr) => {
+                    let noun = Noun::from($noun);
+                    assert!(<$type>::try_from(&noun).is_err());
+                };
+            }
+
+            // Noun -> $type: expect success.
+            {
+                test!(Noun: atom!("mount-point-name"), PathComponent: "mount-point-name");
+                test!(Noun: atom!(""), PathComponent: "!");
+                test!(Noun: atom!("."), PathComponent: "!.");
+                test!(Noun: atom!(".."), PathComponent: "!..");
+                test!(Noun: atom!("!base"), PathComponent: "!!base");
+            }
+
+            // Noun -> $type: expect failure.
+            {
+                test!(Noun: atom!(" "));
+                test!(Noun: atom!(format!("has{}separator", path::MAIN_SEPARATOR)));
+                test!(Noun: cell![atom!("mount-point"), atom!()]);
+            }
+        };
+    }
+
     #[test]
     fn convert_commit_mount_point() {
-        macro_rules! test {
-            // Noun -> CommitMountPoint: expect success.
-            (Noun: $atom:expr, PathComponent: $path_component:literal) => {
-                let noun = Noun::from($atom);
-                let req = CommitMountPoint::try_from(&noun).expect("Noun to CommitMountPoint");
-                assert_eq!(
-                    req.mount_point,
-                    PathComponent(String::from($path_component))
-                );
-            };
-            // Noun -> CommitMountPoint: expect failure.
-            (Noun: $noun:expr) => {
-                let noun = Noun::from($noun);
-                assert!(CommitMountPoint::try_from(&noun).is_err());
-            };
-        }
+        test_noun_to_mount_point!(CommitMountPoint);
+    }
 
-        // Noun -> CommitMountPoint: expect success.
-        {
-            test!(Noun: atom!("mount-point-name"), PathComponent: "mount-point-name");
-            test!(Noun: atom!(""), PathComponent: "!");
-            test!(Noun: atom!("."), PathComponent: "!.");
-            test!(Noun: atom!(".."), PathComponent: "!..");
-            test!(Noun: atom!("!base"), PathComponent: "!!base");
-        }
-
-        // Noun -> CommitMountPoint: expect failure.
-        {
-            test!(Noun: atom!(" "));
-            test!(Noun: atom!(format!("has{}separator", path::MAIN_SEPARATOR)));
-            test!(Noun: cell![atom!("mount-point"), atom!()]);
-        }
+    #[test]
+    fn convert_delete_mount_point() {
+        test_noun_to_mount_point!(DeleteMountPoint);
     }
 
     #[test]
