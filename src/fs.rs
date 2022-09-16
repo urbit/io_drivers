@@ -125,7 +125,7 @@ impl TryFrom<&Noun> for UpdateFileSystem {
         if let Noun::Cell(data) = data {
             let knot = Knot::try_from(data.head_ref())?;
             let mount_point = PathComponent::try_from(knot)?;
-            let changes = ChangeList::try_from(data.tail_ref())?.0;
+            let changes = convert!(data.tail_ref() => Vec<Change>)?;
             Ok(Self {
                 mount_point,
                 changes,
@@ -761,17 +761,6 @@ impl TryFrom<&Noun> for Change {
         } else {
             Err(convert::Error::UnexpectedAtom)
         }
-    }
-}
-
-/// A list of changes to the file system.
-struct ChangeList(Vec<Change>);
-
-impl TryFrom<&Noun> for ChangeList {
-    type Error = convert::Error;
-
-    fn try_from(noun: &Noun) -> Result<Self, Self::Error> {
-        Ok(Self(convert!(noun => Vec<Change>)?))
     }
 }
 
