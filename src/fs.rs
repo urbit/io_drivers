@@ -480,28 +480,7 @@ impl<'a> TryFrom<&'a Noun> for KnotList<&'a Atom> {
     type Error = convert::Error;
 
     fn try_from(noun: &'a Noun) -> Result<Self, Self::Error> {
-        match noun {
-            Noun::Atom(atom) => {
-                if atom.is_null() {
-                    Ok(Self(Vec::new()))
-                } else {
-                    Err(convert::Error::UnexpectedAtom)
-                }
-            }
-            mut noun => {
-                let mut knots = Vec::new();
-                while let Noun::Cell(cell) = &*noun {
-                    knots.push(Knot::try_from(cell.head_ref())?);
-                    noun = cell.tail_ref();
-                }
-                // The list of knots should be null-terminated.
-                if noun.is_null() {
-                    Ok(Self(knots))
-                } else {
-                    Err(convert::Error::ImplType)
-                }
-            }
-        }
+        Ok(Self(convert!(noun => Vec<Knot<&'a Atom>>)?))
     }
 }
 
