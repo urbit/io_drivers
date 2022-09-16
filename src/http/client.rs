@@ -8,7 +8,7 @@ use hyper::{
 };
 use hyper_rustls::{ConfigBuilderExt, HttpsConnector, HttpsConnectorBuilder};
 use log::{debug, info, warn};
-use noun::{atom, atom::Atom, cell, convert, Noun, Rc};
+use noun::{atom::Atom, cell::Cell, convert, Noun, Rc};
 use rustls::ClientConfig;
 use std::collections::HashMap;
 use tokio::{
@@ -349,8 +349,8 @@ impl TryFrom<HyperResponse> for Noun {
     type Error = header::ToStrError;
 
     fn try_from(resp: HyperResponse) -> Result<Self, Self::Error> {
-        let req_num = Rc::<Noun>::from(atom!(resp.req_num));
-        let status = Rc::<Noun>::from(atom!(resp.parts.status.as_u16()));
+        let req_num = Rc::<Noun>::from(Atom::from(resp.req_num));
+        let status = Rc::<Noun>::from(Atom::from(resp.parts.status.as_u16()));
         let null = Rc::<Noun>::from(Atom::null());
 
         let headers = {
@@ -358,13 +358,13 @@ impl TryFrom<HyperResponse> for Noun {
             let headers = &resp.parts.headers;
             for key in headers.keys().map(|k| k.as_str()) {
                 let vals = headers.get_all(key);
-                let key = Rc::<Noun>::from(atom!(key));
+                let key = Rc::<Noun>::from(Atom::from(key));
                 for val in vals {
-                    let val = Rc::<Noun>::from(atom!(val.to_str()?));
-                    headers_cell = Rc::<Noun>::from(cell![
-                        Rc::<Noun>::from(cell![key.clone(), val]),
-                        headers_cell
-                    ]);
+                    let val = Rc::<Noun>::from(Atom::from(val.to_str()?));
+                    headers_cell = Rc::<Noun>::from(Cell::from([
+                        Rc::<Noun>::from(Cell::from([key.clone(), val])),
+                        headers_cell,
+                    ]));
                 }
             }
             headers_cell
@@ -375,13 +375,16 @@ impl TryFrom<HyperResponse> for Noun {
             if body.is_empty() {
                 null
             } else {
-                let body_len = atom!(body.len());
-                let body = atom!(body);
-                Rc::<Noun>::from(cell![null, Rc::<Noun>::from(cell![body_len, body])])
+                let body_len = Atom::from(body.len());
+                let body = Atom::from(body);
+                Rc::<Noun>::from(Cell::from([
+                    null,
+                    Rc::<Noun>::from(Cell::from([body_len, body])),
+                ]))
             }
         };
 
-        Ok(Noun::from(cell!([req_num, status, headers, body])))
+        Ok(Noun::from(Cell::from([req_num, status, headers, body])))
     }
 }
 
@@ -437,26 +440,44 @@ mod tests {
             };
 
             let noun = Noun::try_from(resp).expect("noun from response");
-            let expected = Noun::from(cell![
-                Noun::from(atom!(req_num)),
-                Noun::from(atom!(200u8)),
-                Noun::from(cell![
-                    Noun::from(cell![atom!("server"), atom!("nginx/1.14.0 (Ubuntu)")]),
-                    Noun::from(cell![atom!("date"), atom!("Fri, 08 Jul 2022 16:43:50 GMT"),]),
-                    Noun::from(cell![atom!("content-type"), atom!("application/json")]),
-                    Noun::from(cell![atom!("content-length"), atom!("14645")]),
-                    Noun::from(cell![atom!("connection"), atom!("keep-alive")]),
-                    Noun::from(cell![atom!("vary"), atom!("Accept-Encoding")]),
-                    Noun::from(cell![atom!("vary"), atom!("Origin")]),
-                    Noun::from(cell![atom!("x-cached"), atom!("HIT")]),
-                    Noun::from(atom!(0u8)),
-                ]),
-                Noun::from(cell![
-                    atom!(0u8),
-                    atom!(59u8),
-                    atom!(r#"[{"jsonrpc":"2.0","id":"block number","result":"0xe67461"}]"#),
-                ]),
-            ]);
+            let expected = Noun::from(Cell::from([
+                Noun::from(Atom::from(req_num)),
+                Noun::from(Atom::from(200u8)),
+                Noun::from(Cell::from([
+                    Noun::from(Cell::from([
+                        Atom::from("server"),
+                        Atom::from("nginx/1.14.0 (Ubuntu)"),
+                    ])),
+                    Noun::from(Cell::from([
+                        Atom::from("date"),
+                        Atom::from("Fri, 08 Jul 2022 16:43:50 GMT"),
+                    ])),
+                    Noun::from(Cell::from([
+                        Atom::from("content-type"),
+                        Atom::from("application/json"),
+                    ])),
+                    Noun::from(Cell::from([
+                        Atom::from("content-length"),
+                        Atom::from("14645"),
+                    ])),
+                    Noun::from(Cell::from([
+                        Atom::from("connection"),
+                        Atom::from("keep-alive"),
+                    ])),
+                    Noun::from(Cell::from([
+                        Atom::from("vary"),
+                        Atom::from("Accept-Encoding"),
+                    ])),
+                    Noun::from(Cell::from([Atom::from("vary"), Atom::from("Origin")])),
+                    Noun::from(Cell::from([Atom::from("x-cached"), Atom::from("HIT")])),
+                    Noun::from(Atom::from(0u8)),
+                ])),
+                Noun::from(Cell::from([
+                    Atom::from(0u8),
+                    Atom::from(59u8),
+                    Atom::from(r#"[{"jsonrpc":"2.0","id":"block number","result":"0xe67461"}]"#),
+                ])),
+            ]));
 
             // If this test starts failing, it may be because the headers are in a different
             // (though still correct order).

@@ -2,7 +2,7 @@
 
 use crate::atom_as_str;
 use log::{info, warn};
-use noun::{atom, atom::Atom, cell, cell::Cell, convert, marker::Atomish, Noun, Rc};
+use noun::{atom::Atom, cell::Cell, convert, marker::Atomish, Noun, Rc};
 use std::{
     collections::{hash_map::DefaultHasher, HashMap},
     env, fmt, fs,
@@ -184,19 +184,19 @@ impl FileSystem {
                                         // to the list of changes.
                                         Ok(path) => {
                                             if let Ok(path) = KnotList::try_from(path) {
-                                                let change = cell![
+                                                let change = Cell::from([
                                                     Rc::<Noun>::from(Noun::from(path)),
                                                     null.clone(),
-                                                    Rc::<Noun>::from(cell![
-                                                        Noun::from(cell![
-                                                            atom!("text"),
-                                                            atom!("plain"),
-                                                            atom!()
-                                                        ]),
-                                                        Noun::from(atom!(bytes.len())),
-                                                        Noun::from(atom!(bytes)),
-                                                    ]),
-                                                ];
+                                                    Rc::<Noun>::from(Cell::from([
+                                                        Noun::from(Cell::from([
+                                                            Atom::from("text"),
+                                                            Atom::from("plain"),
+                                                            Atom::null(),
+                                                        ])),
+                                                        Noun::from(Atom::from(bytes.len())),
+                                                        Noun::from(Atom::from(bytes)),
+                                                    ])),
+                                                ]);
                                                 changes.push(change);
                                                 // TODO: verify this does what's expected.
                                                 *old_hash = Some(new_hash);
@@ -237,7 +237,7 @@ impl FileSystem {
                             Ok(path) => {
                                 if let Ok(path) = KnotList::try_from(path) {
                                     let path = Noun::from(path);
-                                    let change = cell![Rc::<Noun>::from(path), null.clone(),];
+                                    let change = Cell::from([Rc::<Noun>::from(path), null.clone()]);
                                     changes.push(change);
                                 } else {
                                     warn!(
@@ -778,7 +778,6 @@ impl TryFrom<&Noun> for ChangeList {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use noun::{atom, cell};
 
     macro_rules! test_noun_to_mount_point {
         ($type:ty) => {
@@ -801,18 +800,18 @@ mod tests {
 
             // Noun -> $type: expect success.
             {
-                test!(Noun: atom!("mount-point-name"), PathComponent: "mount-point-name");
-                test!(Noun: atom!(""), PathComponent: "!");
-                test!(Noun: atom!("."), PathComponent: "!.");
-                test!(Noun: atom!(".."), PathComponent: "!..");
-                test!(Noun: atom!("!base"), PathComponent: "!!base");
+                test!(Noun: Atom::from("mount-point-name"), PathComponent: "mount-point-name");
+                test!(Noun: Atom::from(""), PathComponent: "!");
+                test!(Noun: Atom::from("."), PathComponent: "!.");
+                test!(Noun: Atom::from(".."), PathComponent: "!..");
+                test!(Noun: Atom::from("!base"), PathComponent: "!!base");
             }
 
             // Noun -> $type: expect failure.
             {
-                test!(Noun: atom!(" "));
-                test!(Noun: atom!(format!("has{}separator", path::MAIN_SEPARATOR)));
-                test!(Noun: cell![atom!("mount-point"), atom!()]);
+                test!(Noun: Atom::from(" "));
+                test!(Noun: Atom::from(format!("has{}separator", path::MAIN_SEPARATOR)));
+                test!(Noun: Cell::from([Atom::from("mount-point"), Atom::null()]));
             }
         };
     }
@@ -822,15 +821,15 @@ mod tests {
         // Noun -> Change: expect success.
         {
             {
-                let noun = Noun::from(cell![
-                    Noun::from(cell![
-                        atom!("gen"),
-                        atom!("example"),
-                        atom!("hoon"),
-                        atom!()
-                    ]),
+                let noun = Noun::from(Cell::from([
+                    Noun::from(Cell::from([
+                        Atom::from("gen"),
+                        Atom::from("example"),
+                        Atom::from("hoon"),
+                        Atom::null(),
+                    ])),
                     Noun::null(),
-                ]);
+                ]));
                 let change = Change::try_from(&noun).expect("Noun to Change");
                 assert_eq!(
                     change,
@@ -841,24 +840,28 @@ mod tests {
             }
 
             {
-                let noun = Noun::from(cell![
-                    Noun::from(cell![
-                        atom!("gen"),
-                        atom!("example"),
-                        atom!("hoon"),
-                        atom!()
-                    ]),
+                let noun = Noun::from(Cell::from([
+                    Noun::from(Cell::from([
+                        Atom::from("gen"),
+                        Atom::from("example"),
+                        Atom::from("hoon"),
+                        Atom::null(),
+                    ])),
                     Noun::null(),
-                    Noun::from(cell![atom!("text"), atom!("x-hoon"), atom!(),]),
-                    Noun::from(atom!(14u8)),
-                    Noun::from(atom!(0xa2961282b2020403d6120203d7cu128)),
-                ]);
+                    Noun::from(Cell::from([
+                        Atom::from("text"),
+                        Atom::from("x-hoon"),
+                        Atom::null(),
+                    ])),
+                    Noun::from(Atom::from(14u8)),
+                    Noun::from(Atom::from(0xa2961282b2020403d6120203d7cu128)),
+                ]));
                 let change = Change::try_from(&noun).expect("Noun to Change");
                 assert_eq!(
                     change,
                     Change::EditFile {
                         path: PathBuf::from("gen/example.hoon"),
-                        bytes: atom!(0xa2961282b2020403d6120203d7cu128).into_vec(),
+                        bytes: Atom::from(0xa2961282b2020403d6120203d7cu128).into_vec(),
                     }
                 );
             }
@@ -951,67 +954,74 @@ mod tests {
         // Noun -> KnotList -> PathBuf: expect success.
         {
             {
-                let noun = Noun::from(atom!());
+                let noun = Noun::from(Atom::null());
                 test!(Noun: noun, PathBuf: "");
             }
 
             {
-                let noun = Noun::from(cell![atom!("only-a-single-component"), atom!(),]);
+                let noun = Noun::from(Cell::from([
+                    Atom::from("only-a-single-component"),
+                    Atom::null(),
+                ]));
                 test!(Noun: noun, PathBuf: "only-a-single-component");
             }
 
             {
-                let noun = Noun::from(cell![atom!("fs"), atom!("rs"), atom!()]);
+                let noun = Noun::from(Cell::from([
+                    Atom::from("fs"),
+                    Atom::from("rs"),
+                    Atom::null(),
+                ]));
                 test!(Noun: noun, PathBuf: "fs.rs");
             }
 
             {
-                let noun = Noun::from(cell![
-                    atom!("this"),
-                    atom!("is"),
-                    atom!("a"),
-                    atom!("path"),
-                    atom!("file"),
-                    atom!("extension"),
-                    atom!(),
-                ]);
+                let noun = Noun::from(Cell::from([
+                    Atom::from("this"),
+                    Atom::from("is"),
+                    Atom::from("a"),
+                    Atom::from("path"),
+                    Atom::from("file"),
+                    Atom::from("extension"),
+                    Atom::null(),
+                ]));
                 test!(Noun: noun, PathBuf: "this/is/a/path/file.extension");
             }
 
             {
-                let noun = Noun::from(cell![atom!(""), atom!()]);
+                let noun = Noun::from(Cell::from([Atom::from(""), Atom::null()]));
                 test!(Noun: noun, PathBuf: "!");
             }
 
             {
-                let noun = Noun::from(cell![atom!("."), atom!()]);
+                let noun = Noun::from(Cell::from([Atom::from("."), Atom::null()]));
                 test!(Noun: noun, PathBuf: "!.");
             }
 
             {
-                let noun = Noun::from(cell![atom!(".."), atom!()]);
+                let noun = Noun::from(Cell::from([Atom::from(".."), Atom::null()]));
                 test!(Noun: noun, PathBuf: "!..");
             }
 
             {
-                let noun = Noun::from(cell![atom!("!"), atom!()]);
+                let noun = Noun::from(Cell::from([Atom::from("!"), Atom::null()]));
                 test!(Noun: noun, PathBuf: "!!");
             }
 
             {
-                let noun = Noun::from(cell![atom!("!escaped"), atom!()]);
+                let noun = Noun::from(Cell::from([Atom::from("!escaped"), Atom::null()]));
                 test!(Noun: noun, PathBuf: "!!escaped");
             }
 
             {
-                let noun = Noun::from(cell![
-                    atom!(".."),
-                    atom!("."),
-                    atom!(""),
-                    atom!("!file"),
-                    atom!("!extension"),
-                    atom!()
-                ]);
+                let noun = Noun::from(Cell::from([
+                    Atom::from(".."),
+                    Atom::from("."),
+                    Atom::from(""),
+                    Atom::from("!file"),
+                    Atom::from("!extension"),
+                    Atom::null(),
+                ]));
                 test!(Noun: noun, PathBuf: "!../!./!/!!file.!!extension");
             }
         }
@@ -1019,12 +1029,12 @@ mod tests {
         // Noun -> KnotList: expect failure.
         {
             {
-                let noun = Noun::from(atom!(107u8));
+                let noun = Noun::from(Atom::from(107u8));
                 test!(Noun: noun, KnotList);
             }
 
             {
-                let noun = Noun::from(cell!["missing", "null", "terminator"]);
+                let noun = Noun::from(Cell::from(["missing", "null", "terminator"]));
                 test!(Noun: noun, KnotList);
             }
         }
@@ -1032,7 +1042,7 @@ mod tests {
         // Noun -> KnotList -> PathBuf: expect failure.
         {
             {
-                let noun = Noun::from(cell![atom!("has a space"), atom!()]);
+                let noun = Noun::from(Cell::from([Atom::from("has a space"), Atom::null()]));
                 test!(Noun: noun, PathBuf);
             }
         }
@@ -1056,10 +1066,15 @@ mod tests {
 
         // Noun -> ScanMountPoints: expect success.
         {
-            test!(Noun: atom!(), Vec<PathComponent>: vec![]);
+            test!(Noun: Atom::null(), Vec<PathComponent>: vec![]);
 
             {
-                let cell = cell![atom!("a"), atom!("b"), atom!("c"), atom!()];
+                let cell = Cell::from([
+                    Atom::from("a"),
+                    Atom::from("b"),
+                    Atom::from("c"),
+                    Atom::null(),
+                ]);
                 let path_components = vec![
                     PathComponent(String::from("a")),
                     PathComponent(String::from("b")),
@@ -1072,12 +1087,19 @@ mod tests {
         // Noun -> ScanMountPoints: expect failure.
         {
             {
-                let cell = cell![Noun::from(cell!["unexpected", "cell"]), Noun::from(atom!())];
+                let cell = Cell::from([
+                    Noun::from(Cell::from(["unexpected", "cell"])),
+                    Noun::from(Atom::null()),
+                ]);
                 test!(Noun: cell);
             }
 
             {
-                let cell = cell![atom!("missing"), atom!("null"), atom!("terminator")];
+                let cell = Cell::from([
+                    Atom::from("missing"),
+                    Atom::from("null"),
+                    Atom::from("terminator"),
+                ]);
                 test!(Noun: cell);
             }
         }
@@ -1088,21 +1110,35 @@ mod tests {
         // Noun -> UpdateFileSystem: expect success.
         {
             {
-                let noun = Noun::from(cell![
-                    Noun::from(atom!("mount-point")),
-                    Noun::from(cell![
-                        Noun::from(cell![atom!("gen"), atom!("foo"), atom!("hoon"), atom!(),]),
+                let noun = Noun::from(Cell::from([
+                    Noun::from(Atom::from("mount-point")),
+                    Noun::from(Cell::from([
+                        Noun::from(Cell::from([
+                            Atom::from("gen"),
+                            Atom::from("foo"),
+                            Atom::from("hoon"),
+                            Atom::null(),
+                        ])),
                         Noun::null(),
-                    ]),
-                    Noun::from(cell![
-                        Noun::from(cell![atom!("gen"), atom!("bar"), atom!("hoon"), atom!()]),
+                    ])),
+                    Noun::from(Cell::from([
+                        Noun::from(Cell::from([
+                            Atom::from("gen"),
+                            Atom::from("bar"),
+                            Atom::from("hoon"),
+                            Atom::null(),
+                        ])),
                         Noun::null(),
-                        Noun::from(cell![atom!("text"), atom!("x-hoon"), atom!(),]),
-                        Noun::from(atom!(14u8)),
-                        Noun::from(atom!(0xa2961282b2020403d6120203d7cu128)),
-                    ]),
+                        Noun::from(Cell::from([
+                            Atom::from("text"),
+                            Atom::from("x-hoon"),
+                            Atom::null(),
+                        ])),
+                        Noun::from(Atom::from(14u8)),
+                        Noun::from(Atom::from(0xa2961282b2020403d6120203d7cu128)),
+                    ])),
                     Noun::null(),
-                ]);
+                ]));
                 let req = UpdateFileSystem::try_from(&noun).expect("Noun to UpdateFileSystem");
                 assert_eq!(req.mount_point, PathComponent(String::from("mount-point")));
                 assert_eq!(req.changes.len(), 2);
@@ -1116,7 +1152,7 @@ mod tests {
                     req.changes[1],
                     Change::EditFile {
                         path: PathBuf::from("gen/bar.hoon"),
-                        bytes: atom!(0xa2961282b2020403d6120203d7cu128).into_vec()
+                        bytes: Atom::from(0xa2961282b2020403d6120203d7cu128).into_vec()
                     }
                 );
             }
