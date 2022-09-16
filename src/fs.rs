@@ -2,7 +2,7 @@
 
 use crate::atom_as_str;
 use log::{info, warn};
-use noun::{atom::Atom, cell::Cell, convert, marker::Atomish, Noun};
+use noun::{atom, atom::Atom, cell, cell::Cell, convert, marker::Atomish, Noun, Rc};
 use std::{
     collections::{hash_map::DefaultHasher, HashMap},
     env, fmt, fs,
@@ -13,7 +13,7 @@ use std::{
 use tokio::sync::mpsc::Sender;
 
 //==================================================================================================
-// Request types
+// Request Types
 //==================================================================================================
 
 /// Requests that can be handled by the file system driver.
@@ -163,21 +163,61 @@ impl FileSystem {
     fn commit_mount_point(&mut self, req: CommitMountPoint, _output_tx: Sender<Noun>) {
         if let Some(mount_point) = self.mount_points.remove(&req.mount_point) {
             match mount_point.scan() {
-                Ok((mount_point, old_entries)) => {
-                    let changes = Vec::new();
-                    for (path, old_hash) in &mount_point.entries {
+                Ok((mut mount_point, old_entries)) => {
+                    let mut changes = Vec::new();
+                    let null = Rc::new(Noun::null());
+                    for (path, old_hash) in &mut mount_point.entries {
                         match fs::read(path) {
                             Ok(bytes) => {
                                 let new_hash = Hash::from(&bytes[..]);
+                                // If the hash didn't change, skip this entry.
                                 if Some(&new_hash) != old_hash.as_ref() {
-                                    // append cell
-                                    // [
-                                    //   <path>
-                                    //   ~
-                                    //   [[%text %plain ~] <byte_len> <bytes>]
-                                    // ]
-                                    // to list of changes
-                                    todo!();
+                                    match path.strip_prefix(&mount_point.path) {
+                                        // Append
+                                        //
+                                        // [
+                                        //   <path>
+                                        //   0
+                                        //   [[%text %plain 0] <byte_len> <bytes>]
+                                        // ]
+                                        //
+                                        // to the list of changes.
+                                        Ok(path) => {
+                                            if let Ok(path) = KnotList::try_from(path) {
+                                                let change = cell![
+                                                    Rc::<Noun>::from(Noun::from(path)),
+                                                    null.clone(),
+                                                    Rc::<Noun>::from(cell![
+                                                        Noun::from(cell![
+                                                            atom!("text"),
+                                                            atom!("plain"),
+                                                            atom!()
+                                                        ]),
+                                                        Noun::from(atom!(bytes.len())),
+                                                        Noun::from(atom!(bytes)),
+                                                    ]),
+                                                ];
+                                                changes.push(change);
+                                                // TODO: verify this does what's expected.
+                                                *old_hash = Some(new_hash);
+                                            } else {
+                                                warn!(
+                                                    target: Self::name(),
+                                                    "failed to convert {} into a list of knots",
+                                                    path.display()
+                                                );
+                                            }
+                                        }
+                                        Err(err) => {
+                                            warn!(
+                                                target: Self::name(),
+                                                "failed to strip {} from {}: {}",
+                                                mount_point.path.display(),
+                                                path.display(),
+                                                err
+                                            );
+                                        }
+                                    }
                                 }
                             }
                             Err(err) => {
@@ -191,12 +231,36 @@ impl FileSystem {
                         }
                     }
 
-                    for (_path, _hash) in old_entries {
-                        // append cell [[path ~] ~] to list of changes
-                        todo!();
+                    for (path, _hash) in old_entries {
+                        match path.strip_prefix(&mount_point.path) {
+                            // Append [<path> 0] to the list of changes.
+                            Ok(path) => {
+                                if let Ok(path) = KnotList::try_from(path) {
+                                    let path = Noun::from(path);
+                                    let change = cell![Rc::<Noun>::from(path), null.clone(),];
+                                    changes.push(change);
+                                } else {
+                                    warn!(
+                                        target: Self::name(),
+                                        "failed to convert {} into a list of knots",
+                                        path.display()
+                                    );
+                                }
+                            }
+                            Err(err) => {
+                                warn!(
+                                    target: Self::name(),
+                                    "failed to strip {} from {}: {}",
+                                    mount_point.path.display(),
+                                    path.display(),
+                                    err
+                                );
+                            }
+                        }
                     }
 
-                    let _changes = Noun::from(Cell::from(changes));
+                    let _changes = convert!(changes.into_iter() => Noun);
+                    // TODO: send changes over _output_tx
                     self.mount_points.insert(req.mount_point, mount_point);
                 }
                 Err((mount_point, err)) => {
@@ -393,6 +457,12 @@ impl<'a> TryFrom<&'a Noun> for Knot<&'a Atom> {
     }
 }
 
+impl From<Knot<Atom>> for Noun {
+    fn from(knot: Knot<Atom>) -> Self {
+        Self::from(knot.0)
+    }
+}
+
 /// A  list of [`Knot`]s.
 ///
 /// A list of [`Knot`]s can take three forms:
@@ -431,6 +501,37 @@ impl<'a> TryFrom<&'a Noun> for KnotList<&'a Atom> {
                 }
             }
         }
+    }
+}
+
+impl TryFrom<&Path> for KnotList<Atom> {
+    type Error = ();
+
+    fn try_from(path: &Path) -> Result<Self, Self::Error> {
+        let mut knots = Vec::new();
+        if let Some(parent) = path.parent() {
+            for dir in parent.components() {
+                let dir = Atom::try_from(dir.as_os_str())?;
+                knots.push(Knot(dir));
+            }
+        }
+        if let Some(file_stem) = path.file_stem() {
+            let file_stem = Atom::try_from(file_stem)?;
+            knots.push(Knot(file_stem));
+        }
+        if let Some(file_extension) = path.extension() {
+            let file_extension = Atom::try_from(file_extension)?;
+            knots.push(Knot(file_extension));
+        }
+        Ok(Self(knots))
+    }
+}
+
+impl From<KnotList<Atom>> for Noun {
+    fn from(knots: KnotList<Atom>) -> Self {
+        // This is safe to unwrap because the conversion from `Knot<Atom>` to `Noun` will never
+        // fail.
+        convert!(knots.0.into_iter() => Noun).unwrap()
     }
 }
 
@@ -480,6 +581,8 @@ impl TryFrom<KnotList<&Atom>> for PathBuf {
 //==================================================================================================
 
 /// A file system mount point.
+///
+/// TODO: handle single file mount points.
 struct MountPoint {
     /// The absolute path to the mount point.
     path: PathBuf,
@@ -667,6 +770,10 @@ impl TryFrom<&Noun> for ChangeList {
         Ok(Self(convert!(noun => Vec<Change>)?))
     }
 }
+
+//==================================================================================================
+// Tests
+//==================================================================================================
 
 #[cfg(test)]
 mod tests {
