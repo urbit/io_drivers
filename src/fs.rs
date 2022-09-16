@@ -123,12 +123,9 @@ impl TryFrom<&Noun> for UpdateFileSystem {
     /// structure of a single change.
     fn try_from(data: &Noun) -> Result<Self, Self::Error> {
         if let Noun::Cell(data) = data {
-            let knot = Knot::try_from(data.head_ref())?;
-            let mount_point = PathComponent::try_from(knot)?;
-            let changes = convert!(data.tail_ref() => Vec<Change>)?;
             Ok(Self {
-                mount_point,
-                changes,
+                mount_point: PathComponent::try_from(Knot::try_from(data.head_ref())?)?,
+                changes: convert!(data.tail_ref() => Vec<Change>)?,
             })
         } else {
             Err(convert::Error::UnexpectedAtom)
