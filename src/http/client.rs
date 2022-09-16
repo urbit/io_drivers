@@ -208,13 +208,12 @@ impl HttpClient {
                 if let Err(_resp) = output_tx.send(resp).await {
                     warn!(
                         target: Self::name(),
-                        "failed to send response to request #{} to stdout task", req_num
+                        "failed to send response to request #{} to output task", req_num
                     );
                 } else {
                     info!(
-                        "{}: sent response to request #{} to stdout task",
-                        Self::name(),
-                        req_num
+                        target: Self::name(),
+                        "sent response to request #{} to output task", req_num
                     );
                 }
             });
@@ -282,7 +281,9 @@ macro_rules! impl_driver {
                                 self.send_request(req, output_tx.clone())
                             }
                             Ok(Request::CancelRequest(req)) => self.cancel_request(req),
-                            _ => todo!(),
+                            _ => {
+                                warn!(target: Self::name(), "skipping unidentifiable request");
+                            }
                         }
                     }
                     for (req_num, task) in self.inflight_req {

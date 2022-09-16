@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
-use crate::atom_as_str;
-use log::{info, warn};
+use crate::{atom_as_str, Driver, Status};
+use log::{debug, info, warn};
 use noun::{atom::Atom, cell::Cell, convert, marker::Atomish, Noun, Rc};
 use std::{
     collections::{hash_map::DefaultHasher, HashMap},
@@ -10,7 +10,11 @@ use std::{
     io,
     path::{self, Path, PathBuf},
 };
-use tokio::sync::mpsc::Sender;
+use tokio::{
+    io::{Stdin, Stdout},
+    sync::mpsc::{Receiver, Sender},
+    task::JoinHandle,
+};
 
 //==================================================================================================
 // Request Types
@@ -30,6 +34,15 @@ enum Request {
     /// A request to update the file system from a list of changes.
     UpdateFileSystem(UpdateFileSystem),
 }
+
+impl_try_from_noun_for_request!(
+    Request,
+    // "dirk", "ogre", etc are terrible names, but we can't do anything about it here.
+    "dirk" => CommitMountPoint,
+    "ogre" => DeleteMountPoint,
+    "hill" => ScanMountPoints,
+    "ergo" => UpdateFileSystem,
+);
 
 /// A request to commit a mount point.
 struct CommitMountPoint {
@@ -144,16 +157,12 @@ pub struct FileSystem {
 }
 
 impl FileSystem {
-    const fn name() -> &'static str {
-        "file-system"
-    }
-
     /// Handles a [`CommitMountPoint`] request.
-    fn commit_mount_point(&mut self, req: CommitMountPoint, _output_tx: Sender<Noun>) {
+    fn commit_mount_point(&mut self, req: CommitMountPoint) -> Option<Noun> {
         if let Some(mount_point) = self.mount_points.remove(&req.mount_point) {
             match mount_point.scan() {
                 Ok((mut mount_point, old_entries)) => {
-                    let mut changes = Vec::new();
+                    let mut changes: Vec<Cell> = Vec::new();
                     let null = Rc::new(Noun::null());
                     for (path, old_hash) in &mut mount_point.entries {
                         match fs::read(path) {
@@ -248,9 +257,10 @@ impl FileSystem {
                         }
                     }
 
-                    let _changes = convert!(changes.into_iter() => Noun);
-                    // TODO: send changes over _output_tx
                     self.mount_points.insert(req.mount_point, mount_point);
+                    // This is safe to unwrap because the conversion from `Cell` to `Noun` will
+                    // never fail.
+                    Some(convert!(changes.into_iter() => Noun).unwrap())
                 }
                 Err((mount_point, err)) => {
                     warn!(
@@ -260,10 +270,12 @@ impl FileSystem {
                         err
                     );
                     self.mount_points.insert(req.mount_point, mount_point);
+                    None
                 }
             }
         } else {
             info!("mount point {} is not actively mounted", req.mount_point);
+            None
         }
     }
 
@@ -359,6 +371,61 @@ impl FileSystem {
         }
     }
 }
+
+/// Implements the [`Driver`] trait for the [`FileSystem`] driver.
+macro_rules! impl_driver {
+    ($input_src:ty, $output_sink:ty) => {
+        impl Driver<$input_src, $output_sink> for FileSystem {
+            fn new() -> Result<Self, Status> {
+                todo!()
+            }
+
+            fn name() -> &'static str {
+                "file-system"
+            }
+
+            fn handle_requests(
+                mut self,
+                mut input_rx: Receiver<Noun>,
+                output_tx: Sender<Noun>,
+            ) -> JoinHandle<Status> {
+                let task = tokio::spawn(async move {
+                    while let Some(req) = input_rx.recv().await {
+                        // TODO: think about whether requests can/should be handled asyncrhonously.
+                        match Request::try_from(req) {
+                            Ok(Request::CommitMountPoint(req)) => {
+                                if let Some(resp) = self.commit_mount_point(req) {
+                                    if let Err(_resp) = output_tx.send(resp).await {
+                                        warn!(
+                                            target: Self::name(),
+                                            "failed to send committed file system changes to output task"
+                                        );
+                                    } else {
+                                        info!(
+                                            target: Self::name(),
+                                            "sent committed file system changes to output task"
+                                        );
+                                    }
+                                }
+                            }
+                            Ok(Request::DeleteMountPoint(req)) => self.delete_mount_point(req),
+                            Ok(Request::ScanMountPoints(req)) => self.scan_mount_points(req),
+                            Ok(Request::UpdateFileSystem(req)) => self.update_file_system(req),
+                            _ => {
+                                warn!(target: Self::name(), "skipping unidentifiable request");
+                            }
+                        }
+                    }
+                    Status::Success
+                });
+                debug!(target: Self::name(), "spawned handling task");
+                task
+            }
+        }
+    };
+}
+
+impl_driver!(Stdin, Stdout);
 
 //==================================================================================================
 // Path Manipulation
