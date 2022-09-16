@@ -31,66 +31,28 @@ enum Request {
     UpdateFileSystem(UpdateFileSystem),
 }
 
-impl_try_from_noun_for_request!(
-    Request,
-    "dirk" => CommitMountPoint,
-    "ogre" => DeleteMountPoint,
-    "hill" => ScanMountPoints,
-    "ergo" => UpdateFileSystem,
-);
-
-/// Implements `TryFrom<&Noun>` for a struct consisting of a single field `mount_point` of type
-/// [`PathComponent`] or `mount_points` of type [`Vec<PathComponent>`].
-macro_rules! impl_try_from_noun {
-    // Implements `TryFrom<&Noun>` for a struct with a single field named `mount_point` of type
-    // `PathComponent`. A properly structured noun is:
-    //
-    // ```text
-    // <mount_point>
-    // ```
-    //
-    // where `<mount_point>` is a mount point name.
-    ($type:ty { mount_point }) => {
-        impl TryFrom<&Noun> for $type {
-            type Error = convert::Error;
-
-            fn try_from(data: &Noun) -> Result<Self, Self::Error> {
-                let knot = Knot::try_from(data)?;
-                let mount_point = PathComponent::try_from(knot)?;
-                Ok(Self { mount_point })
-            }
-        }
-    };
-    // Implements `TryFrom<&Noun>` for a struct with a single field named `mount_points` of type
-    // `Vec<PathComponent>`. A properly structured noun is:
-    //
-    // ```text
-    // <mount_point_list>
-    // ```
-    //
-    // where `<mount_point_list>` is a null-terminated list of mount point names.
-    ($type:ty { mount_points }) => {
-        impl TryFrom<&Noun> for $type {
-            type Error = convert::Error;
-            fn try_from(data: &Noun) -> Result<Self, Self::Error> {
-                let knots = KnotList::try_from(data)?;
-                let mut mount_points = Vec::new();
-                for knot in knots.0 {
-                    mount_points.push(PathComponent::try_from(knot)?);
-                }
-                Ok(Self { mount_points })
-            }
-        }
-    };
-}
-
 /// A request to commit a mount point.
 struct CommitMountPoint {
     /// The name of the mount point to commit.
     mount_point: PathComponent,
 }
 
-impl_try_from_noun!(CommitMountPoint { mount_point });
+impl TryFrom<&Noun> for CommitMountPoint {
+    type Error = convert::Error;
+
+    /// A properly structured noun is:
+    ///
+    /// ```text
+    /// <mount_point>
+    /// ```
+    ///
+    /// where `<mount_point>` is the name of the mount point to commit.
+    fn try_from(data: &Noun) -> Result<Self, Self::Error> {
+        Ok(Self {
+            mount_point: PathComponent::try_from(Knot::try_from(data)?)?,
+        })
+    }
+}
 
 /// A request to delete a mount point.
 struct DeleteMountPoint {
@@ -98,7 +60,22 @@ struct DeleteMountPoint {
     mount_point: PathComponent,
 }
 
-impl_try_from_noun!(DeleteMountPoint { mount_point });
+impl TryFrom<&Noun> for DeleteMountPoint {
+    type Error = convert::Error;
+
+    /// A properly structured noun is:
+    ///
+    /// ```text
+    /// <mount_point>
+    /// ```
+    ///
+    /// where `<mount_point>` is the name of the mount point to delete.
+    fn try_from(data: &Noun) -> Result<Self, Self::Error> {
+        Ok(Self {
+            mount_point: PathComponent::try_from(Knot::try_from(data)?)?,
+        })
+    }
+}
 
 /// A request to scan a list of mount points.
 struct ScanMountPoints {
@@ -106,7 +83,22 @@ struct ScanMountPoints {
     mount_points: Vec<PathComponent>,
 }
 
-impl_try_from_noun!(ScanMountPoints { mount_points });
+impl TryFrom<&Noun> for ScanMountPoints {
+    type Error = convert::Error;
+
+    /// A properly structured noun is:
+    ///
+    /// ```text
+    /// <mount_point_list>
+    /// ```
+    ///
+    /// where `<mount_point_list>` is a null-terminated list of mount point names.
+    fn try_from(data: &Noun) -> Result<Self, Self::Error> {
+        Ok(Self {
+            mount_points: convert!(data => Vec<PathComponent>)?,
+        })
+    }
+}
 
 /// A request to update the file system from a list of changes.
 struct UpdateFileSystem {
@@ -419,6 +411,18 @@ impl TryFrom<Knot<&Atom>> for PathComponent {
             }
         } else {
             Err(convert::Error::ImplType)
+        }
+    }
+}
+
+impl TryFrom<&Noun> for PathComponent {
+    type Error = convert::Error;
+
+    fn try_from(noun: &Noun) -> Result<Self, Self::Error> {
+        if let Noun::Atom(noun) = noun {
+            Self::try_from(Knot(noun))
+        } else {
+            Err(convert::Error::UnexpectedCell)
         }
     }
 }
