@@ -69,7 +69,7 @@ impl TryFrom<&Noun> for SendRequest {
                         if let (Noun::Atom(body_len), Noun::Atom(body)) = (&*body_len, &*body) {
                             let body_len = body_len.as_u64().ok_or(convert::Error::AtomToUint)?;
                             // Ensure trailing null bytes are retained.
-                            let mut body = atom_as_str(body)?.to_string();
+                            let mut body = String::from(atom_as_str(body)?);
                             let expected_len = usize::try_from(body_len)
                                 .map_err(|_| convert::Error::AtomToUint)?;
                             while body.len() < expected_len {
