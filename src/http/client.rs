@@ -47,7 +47,7 @@ impl TryFrom<&Noun> for SendRequest {
         if let Noun::Cell(data) = data {
             let [req_num, method, uri, headers, body] =
                 data.to_array::<5>().ok_or(convert::Error::MissingValue)?;
-            if let (Noun::Atom(req_num), Noun::Atom(method), Noun::Atom(uri), mut headers, body) =
+            if let (Noun::Atom(req_num), Noun::Atom(method), Noun::Atom(uri), headers, body) =
                 (&*req_num, &*method, &*uri, headers, body)
             {
                 let req_num = req_num.as_u64().ok_or(convert::Error::AtomToUint)?;
@@ -56,20 +56,8 @@ impl TryFrom<&Noun> for SendRequest {
                     .method(atom_as_str(method)?)
                     .uri(atom_as_str(uri)?);
 
-                while let Noun::Cell(cell) = &*headers {
-                    let header = cell.head();
-                    if let Noun::Cell(header) = &*header {
-                        if let (Noun::Atom(key), Noun::Atom(val)) =
-                            (&*header.head(), &*header.tail())
-                        {
-                            req = req.header(atom_as_str(key)?, atom_as_str(val)?);
-                        } else {
-                            return Err(convert::Error::UnexpectedCell);
-                        }
-                    } else {
-                        return Err(convert::Error::UnexpectedAtom);
-                    }
-                    headers = cell.tail();
+                for (key, val) in convert!(&*headers => HashMap<&str, &str>)? {
+                    req = req.header(key, val);
                 }
 
                 let (body_len, body) = match &*body {
