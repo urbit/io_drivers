@@ -299,26 +299,30 @@ impl FileSystem {
     /// Handles a [`ScanMountPoints`] request.
     fn scan_mount_points(&mut self, req: ScanMountPoints) {
         for name in req.mount_points {
-            if let Some(mount_point) = self.mount_points.remove(&name) {
-                match mount_point.scan() {
-                    Ok((mount_point, _old_entries)) => {
-                        self.mount_points.insert(name, mount_point);
+            let mount_point = match self.mount_points.remove(&name) {
+                Some(mount_point) => mount_point,
+                // Create a new mount point if the driver doesn't recognize the mount point name.
+                None => match MountPoint::new(name.clone()) {
+                    Ok(mount_point) => mount_point,
+                    Err(err) => {
+                        warn!("failed to create new mount point {}: {}", name, err);
+                        continue;
                     }
-                    Err((mount_point, err)) => {
-                        warn!(
-                            target: Self::name(),
-                            "failed to scan {}: {}",
-                            mount_point.path.display(),
-                            err
-                        );
-                        self.mount_points.insert(name, mount_point);
-                    }
+                },
+            };
+            match mount_point.scan() {
+                Ok((mount_point, _old_entries)) => {
+                    self.mount_points.insert(name, mount_point);
                 }
-            } else {
-                info!(
-                    target: Self::name(),
-                    "mount point {} is not actively mounted", name
-                );
+                Err((mount_point, err)) => {
+                    warn!(
+                        target: Self::name(),
+                        "failed to scan {}: {}",
+                        mount_point.path.display(),
+                        err
+                    );
+                    self.mount_points.insert(name, mount_point);
+                }
             }
         }
     }
@@ -445,7 +449,7 @@ impl_driver!(Stdin, Stdout);
 /// - `!.`,
 /// - `!..`, and
 /// - `!!<some_chars>`.
-#[derive(Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct PathComponent(String);
 
 /// Enables a [`PathComponent`] to be pushed onto a [`Path`].
