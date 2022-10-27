@@ -10,7 +10,8 @@
 /// with that request.
 ///
 /// This macro takes the name of the request enum and one or more match arms that map from a
-/// `<tag>` to the type of request that the `<tag>` represents.
+/// `<tag>` to the type of request that the `<tag>` represents. The type of request in each match
+/// arm must implement `TryFrom<&Noun>`.
 ///
 /// # Examples
 ///
@@ -64,7 +65,6 @@ macro_rules! impl_try_from_noun_for_request {
                 }
             }
         }
-
     };
 }
 
