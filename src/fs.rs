@@ -159,124 +159,150 @@ pub struct FileSystem {
 impl FileSystem {
     /// Handles a [`CommitMountPoint`] request.
     fn commit_mount_point(&mut self, req: CommitMountPoint) -> Option<Noun> {
-        if let Some(mount_point) = self.mount_points.remove(&req.mount_point) {
-            match mount_point.scan() {
-                Ok((mut mount_point, old_entries)) => {
-                    let mut changes: Vec<Cell> = Vec::new();
-                    let null = Rc::new(Noun::null());
-                    for (path, old_hash) in &mut mount_point.entries {
-                        match fs::read(path) {
-                            Ok(bytes) => {
-                                let new_hash = Hash::from(&bytes[..]);
-                                // If the hash didn't change, skip this entry.
-                                if Some(&new_hash) != old_hash.as_ref() {
-                                    match path.strip_prefix(&mount_point.path) {
-                                        // Append
-                                        //
-                                        // [
-                                        //   <path>
-                                        //   0
-                                        //   [[%text %plain 0] <byte_len> <bytes>]
-                                        // ]
-                                        //
-                                        // to the list of changes.
-                                        Ok(path) => {
-                                            if let Ok(path) = KnotList::try_from(path) {
-                                                let change = Cell::from([
-                                                    Rc::<Noun>::from(Noun::from(path)),
-                                                    null.clone(),
-                                                    Rc::<Noun>::from(Cell::from([
-                                                        Noun::from(Cell::from([
-                                                            Atom::from("text"),
-                                                            Atom::from("plain"),
-                                                            Atom::null(),
-                                                        ])),
-                                                        Noun::from(Atom::from(bytes.len())),
-                                                        Noun::from(Atom::from(bytes)),
-                                                    ])),
-                                                ]);
-                                                changes.push(change);
-                                                // TODO: verify this does what's expected.
-                                                *old_hash = Some(new_hash);
-                                            } else {
-                                                warn!(
-                                                    target: Self::name(),
-                                                    "failed to convert {} into a list of knots",
-                                                    path.display()
-                                                );
-                                            }
-                                        }
-                                        Err(err) => {
-                                            warn!(
-                                                target: Self::name(),
-                                                "failed to strip {} from {}: {}",
-                                                mount_point.path.display(),
-                                                path.display(),
-                                                err
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                            Err(err) => {
-                                warn!(
-                                    target: Self::name(),
-                                    "failed to read {}: {}",
-                                    path.display(),
-                                    err
-                                );
-                            }
-                        }
-                    }
+        // We have to remove our mount point from `self.mount_points` so that we take ownership
+        // (as opposed to having a reference).
+        let mount_point = match self.mount_points.remove(&req.mount_point) {
+            Some(mount_point) => mount_point,
+            None => {
+                info!("mount point {} is not actively mounted", req.mount_point);
+                return None;
+            }
+        };
 
-                    for (path, _hash) in old_entries {
-                        match path.strip_prefix(&mount_point.path) {
-                            // Append [<path> 0] to the list of changes.
-                            Ok(path) => {
-                                if let Ok(path) = KnotList::try_from(path) {
-                                    let path = Noun::from(path);
-                                    let change = Cell::from([Rc::<Noun>::from(path), null.clone()]);
-                                    changes.push(change);
-                                } else {
-                                    warn!(
-                                        target: Self::name(),
-                                        "failed to convert {} into a list of knots",
-                                        path.display()
-                                    );
-                                }
-                            }
-                            Err(err) => {
-                                warn!(
-                                    target: Self::name(),
-                                    "failed to strip {} from {}: {}",
-                                    mount_point.path.display(),
-                                    path.display(),
-                                    err
-                                );
-                            }
-                        }
-                    }
+        let (mut mount_point, old_entries) = match mount_point.scan() {
+            Ok(res_tuple) => res_tuple,
+            Err((mount_point, err)) => {
+                warn!(
+                    target: Self::name(),
+                    "failed to scan{}: {}",
+                    mount_point.path.display(),
+                    err
+                );
+                self.mount_points.insert(req.mount_point, mount_point);
+                return None;
+            }
+        };
 
-                    self.mount_points.insert(req.mount_point, mount_point);
-                    // This is safe to unwrap because the conversion from `Cell` to `Noun` will
-                    // never fail.
-                    Some(convert!(changes.into_iter() => Noun).unwrap())
-                }
-                Err((mount_point, err)) => {
+        let mut changes: Vec<Cell> = Vec::new();
+        let null = Rc::new(Noun::null());
+
+        // Record entries that have been added or updated.
+        for (path, old_hash) in &mut mount_point.entries {
+            // Read the contents of the file.
+            let bytes = match fs::read(path) {
+                Ok(bytes) => bytes,
+                Err(err) => {
                     warn!(
                         target: Self::name(),
-                        "failed to scan {}: {}",
-                        mount_point.path.display(),
+                        "failed to read {}: {}",
+                        path.display(),
                         err
                     );
-                    self.mount_points.insert(req.mount_point, mount_point);
-                    None
+                    continue;
                 }
+            };
+
+            // Compute the file's new hash and compare it to the old hash.
+            let new_hash = Hash::from(&bytes[..]);
+            // If the hash didn't change, skip this entry.
+            if Some(&new_hash) == old_hash.as_ref() {
+                continue;
             }
-        } else {
-            info!("mount point {} is not actively mounted", req.mount_point);
-            None
+
+            // Convert the file's absolute path to a mount-point-relative path.
+            let path = match path.strip_prefix(&mount_point.path) {
+                Ok(path) => path,
+                Err(err) => {
+                    warn!(
+                        target: Self::name(),
+                        "failed to strip {} from {}: {}",
+                        mount_point.path.display(),
+                        path.display(),
+                        err
+                    );
+                    continue;
+                }
+            };
+
+            // Convert into a list of knots.
+            let path = match KnotList::try_from(path) {
+                Ok(path) => path,
+                Err(_err) => {
+                    warn!(
+                        target: Self::name(),
+                        "failed to convert {} into a list of knots",
+                        path.display()
+                    );
+                    continue;
+                }
+            };
+
+            // Append
+            //
+            // [
+            //   <path>
+            //   0
+            //   [[%text %plain 0] <byte_len> <bytes>]
+            // ]
+            //
+            // to the list of changes.
+            let change = Cell::from([
+                Rc::<Noun>::from(Noun::from(path)),
+                null.clone(),
+                Rc::<Noun>::from(Cell::from([
+                    Noun::from(Cell::from([
+                        Atom::from("text"),
+                        Atom::from("plain"),
+                        Atom::null(),
+                    ])),
+                    Noun::from(Atom::from(bytes.len())),
+                    Noun::from(Atom::from(bytes)),
+                ])),
+            ]);
+            changes.push(change);
+
+            // TODO: verify this updates the map in-place.
+            *old_hash = Some(new_hash);
         }
+
+        // Record entries that have been removed.
+        for (path, _hash) in old_entries {
+            // Convert the file's absolute path to a mount-point-relative path.
+            let path = match path.strip_prefix(&mount_point.path) {
+                Ok(path) => path,
+                Err(err) => {
+                    warn!(
+                        target: Self::name(),
+                        "failed to strip {} from {}: {}",
+                        mount_point.path.display(),
+                        path.display(),
+                        err
+                    );
+                    continue;
+                }
+            };
+
+            // Convert into a list of knots.
+            let path = match KnotList::try_from(path) {
+                Ok(path) => path,
+                Err(_err) => {
+                    warn!(
+                        target: Self::name(),
+                        "failed to convert {} into a list of knots",
+                        path.display()
+                    );
+                    continue;
+                }
+            };
+
+            // Append [<path> 0] to the list of changes.
+            let change = Cell::from([Rc::<Noun>::from(Noun::from(path)), null.clone()]);
+            changes.push(change);
+        }
+
+        self.mount_points.insert(req.mount_point, mount_point);
+        // This is safe to unwrap because the conversion from `Cell` to `Noun` will never fail.
+        Some(convert!(changes.into_iter() => Noun).unwrap())
     }
 
     /// Handles a [`DeleteMountPoint`] request.
