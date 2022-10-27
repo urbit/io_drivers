@@ -360,49 +360,64 @@ impl FileSystem {
 
     /// Handles an [`UpdateFileSystem`] request.
     fn update_file_system(&mut self, req: UpdateFileSystem) {
-        if let Some(mount_point) = self.mount_points.get_mut(&req.mount_point) {
-            for change in req.changes {
-                match change {
-                    Change::EditFile { path, bytes } => {
-                        let path: PathBuf = [&mount_point.path, &path].iter().collect();
-                        let new_hash = Hash::from(&bytes[..]);
-                        if let Some(Some(old_hash)) = mount_point.entries.get(&path) {
-                            // Don't update the file if the hash hasn't changed.
-                            if new_hash == *old_hash {
-                                continue;
-                            }
+        let mount_point = match self.mount_points.get_mut(&req.mount_point) {
+            Some(mount_point) => mount_point,
+            None => {
+                info!(
+                    target: Self::name(),
+                    "mount point {} is not actively mounted", req.mount_point
+                );
+                return;
+            }
+        };
+
+        for change in req.changes {
+            match change {
+                Change::EditFile { path, bytes } => {
+                    let path: PathBuf = [&mount_point.path, &path].iter().collect();
+
+                    let new_hash = Hash::from(&bytes[..]);
+                    // Don't update the file if the hash hasn't changed.
+                    if let Some(Some(old_hash)) = mount_point.entries.get(&path) {
+                        if new_hash == *old_hash {
+                            continue;
                         }
-                        if let Err(err) = fs::write(&path, bytes) {
+                    }
+
+                    // Write the updated file contents to the file system.
+                    match fs::write(&path, bytes) {
+                        Ok(()) => {
+                            mount_point.entries.insert(path, Some(new_hash));
+                        }
+                        Err(err) => {
                             warn!(
                                 target: Self::name(),
-                                "failed to update {}: {}",
+                                "failed to update: {}: {}",
                                 path.display(),
                                 err
                             );
-                        } else {
-                            mount_point.entries.insert(path, Some(new_hash));
                         }
                     }
-                    Change::RemoveFile { path } => {
-                        let path: PathBuf = [&mount_point.path, &path].iter().collect();
-                        if let Err(err) = fs::remove_file(&path) {
+                }
+
+                Change::RemoveFile { path } => {
+                    let path: PathBuf = [&mount_point.path, &path].iter().collect();
+                    // Remove the file from the file system.
+                    match fs::remove_file(&path) {
+                        Ok(()) => {
+                            mount_point.entries.remove(&path);
+                        }
+                        Err(err) => {
                             warn!(
                                 target: Self::name(),
                                 "failed to remove {}: {}",
                                 path.display(),
                                 err
                             );
-                        } else {
-                            mount_point.entries.remove(&path);
                         }
                     }
                 }
             }
-        } else {
-            info!(
-                target: Self::name(),
-                "mount point {} is not actively mounted", req.mount_point
-            );
         }
     }
 }
