@@ -1,3 +1,5 @@
-*.bak
-/Cargo.lock
+# Cargo.
 /target
+
+# Miscellaneous.
+*.bak
