@@ -43,6 +43,36 @@ struct SendRequest {
 impl TryFrom<&Noun> for SendRequest {
     type Error = convert::Error;
 
+    /// A properly structured noun is:
+    ///
+    /// ```text
+    /// [
+    ///   <req_num>
+    ///   <method>
+    ///   <uri>
+    ///   <headers>
+    ///   <body>
+    /// ]
+    /// ```
+    ///
+    /// where `<req_num>` is the request number, `<method>` is the HTTP method, `<uri>` is the HTTP
+    /// URI, `<headers>` is a null-terminated list of HTTP request headers of the form
+    ///
+    /// ```text
+    /// [
+    ///   [key0 val0]
+    ///   ...
+    ///   [keyN valN]
+    ///   ~
+    /// ]
+    /// ```,
+    ///
+    /// and `<body>` is an HTTP request body, which is either null (i.e. an empty request body), or
+    /// non-null, in which case it's of the form
+    ///
+    /// ```text
+    /// [~ <body_len> <body>]
+    /// ```.
     fn try_from(data: &Noun) -> Result<Self, Self::Error> {
         if let Noun::Cell(data) = data {
             let [req_num, method, uri, headers, body] =
@@ -471,6 +501,89 @@ mod tests {
             // If this test starts failing, it may be because the headers are in a different
             // (though still correct order).
             assert_eq!(noun, expected);
+        }
+    }
+
+    /// Tests the `TryFrom<&Noun>` implementation for [`SendRequest`].
+    #[test]
+    fn send_request_from_noun() {
+        // GET request to https://archlinux.org/.
+        {
+            let req_num = 137;
+            let method = "GET";
+            let uri_scheme = "https";
+            let uri_authority = "archlinux.org";
+            let uri_path = "/";
+            let uri = format!("{}://{}{}", uri_scheme, uri_authority, uri_path);
+            let noun = Noun::from(Cell::from([
+                Noun::from(Atom::from(req_num)),
+                Noun::from(Atom::from(method)),
+                Noun::from(Atom::from(uri)),
+                Noun::null(),
+                Noun::null(),
+            ]));
+            let req = SendRequest::try_from(&noun).expect("&Noun to SendRequest");
+            assert_eq!(req.req_num, req_num);
+            assert_eq!(req.req.method().as_str(), method);
+            assert_eq!(req.req.uri().scheme_str().unwrap(), uri_scheme);
+            assert_eq!(req.req.uri().authority().unwrap(), uri_authority);
+            assert_eq!(req.req.uri().path(), uri_path);
+        }
+
+        // GET request to http://www.lmdb.tech/doc/starting.html.
+        {
+            let req_num = 5918;
+            let method = "GET";
+            let uri_scheme = "http";
+            let uri_authority = "www.lmdb.tech";
+            let uri_path = "/doc/starting.html";
+            let uri = format!("{}://{}{}", uri_scheme, uri_authority, uri_path);
+            let noun = Noun::from(Cell::from([
+                Noun::from(Atom::from(req_num)),
+                Noun::from(Atom::from(method)),
+                Noun::from(Atom::from(uri)),
+                Noun::null(),
+                Noun::null(),
+            ]));
+            let req = SendRequest::try_from(&noun).expect("&Noun to SendRequest");
+            assert_eq!(req.req_num, req_num);
+            assert_eq!(req.req.method().as_str(), method);
+            assert_eq!(req.req.uri().scheme_str().unwrap(), uri_scheme);
+            assert_eq!(req.req.uri().authority().unwrap(), uri_authority);
+            assert_eq!(req.req.uri().path(), uri_path);
+        }
+
+        // POST request to http://eth-mainnet.urbit.org:8545.
+        {
+            let req_num = 143;
+            let method = "POST";
+            let uri_scheme = "http";
+            let uri_authority = "eth-mainnet.urbit.org:8545";
+            let uri = format!("{}://{}", uri_scheme, uri_authority);
+            let header = ("Content-Type", "application/json");
+            let noun = Noun::from(Cell::from([
+                Noun::from(Atom::from(req_num)),
+                Noun::from(Atom::from(method)),
+                Noun::from(Atom::from(uri)),
+                Noun::from(Cell::from([
+                    Noun::from(Cell::from([header.0, header.1])),
+                    Noun::null(),
+                ])),
+                Noun::from(Cell::from([
+                    Atom::null(),
+                    Atom::from(153u8),
+                    Atom::from(
+                        r#"[{"params":["0x82c8ca06fe8094fefaccaaf3a1be8522414c1a77a7dd281c9bf42b282b304e2b"],"id":"tx by hash","jsonrpc":"2.0","method":"eth_getTransactionByHash"}]"#,
+                    ),
+                ])),
+            ]));
+            let req = SendRequest::try_from(&noun).expect("&Noun to SendRequest");
+            assert_eq!(req.req_num, req_num);
+            assert_eq!(req.req.method().as_str(), method);
+            assert_eq!(req.req.uri().scheme_str().unwrap(), uri_scheme);
+            assert_eq!(req.req.uri().authority().unwrap(), uri_authority);
+            assert_eq!(req.req.uri().path(), "/");
+            assert_eq!(req.req.headers().get(header.0).unwrap(), header.1);
         }
     }
 }
