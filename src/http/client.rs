@@ -504,32 +504,14 @@ mod tests {
                 Noun::from(Atom::from(req_num)),
                 Noun::from(Atom::from(200u8)),
                 Noun::from(Cell::from([
-                    Noun::from(Cell::from([
-                        Atom::from("server"),
-                        Atom::from("nginx/1.14.0 (Ubuntu)"),
-                    ])),
-                    Noun::from(Cell::from([
-                        Atom::from("date"),
-                        Atom::from("Fri, 08 Jul 2022 16:43:50 GMT"),
-                    ])),
-                    Noun::from(Cell::from([
-                        Atom::from("content-type"),
-                        Atom::from("application/json"),
-                    ])),
-                    Noun::from(Cell::from([
-                        Atom::from("content-length"),
-                        Atom::from("14645"),
-                    ])),
-                    Noun::from(Cell::from([
-                        Atom::from("connection"),
-                        Atom::from("keep-alive"),
-                    ])),
-                    Noun::from(Cell::from([
-                        Atom::from("vary"),
-                        Atom::from("Accept-Encoding"),
-                    ])),
-                    Noun::from(Cell::from([Atom::from("vary"), Atom::from("Origin")])),
-                    Noun::from(Cell::from([Atom::from("x-cached"), Atom::from("HIT")])),
+                    Noun::from(Cell::from(["server", "nginx/1.14.0 (Ubuntu)"])),
+                    Noun::from(Cell::from(["date", "Fri, 08 Jul 2022 16:43:50 GMT"])),
+                    Noun::from(Cell::from(["content-type", "application/json"])),
+                    Noun::from(Cell::from(["content-length", "14645"])),
+                    Noun::from(Cell::from(["connection", "keep-alive"])),
+                    Noun::from(Cell::from(["vary", "Accept-Encoding"])),
+                    Noun::from(Cell::from(["vary", "Origin"])),
+                    Noun::from(Cell::from(["x-cached", "HIT"])),
                     Noun::from(Atom::from(0u8)),
                 ])),
                 Noun::from(Cell::from([
