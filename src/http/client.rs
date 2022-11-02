@@ -145,6 +145,13 @@ struct CancelRequest {
 impl TryFrom<&Noun> for CancelRequest {
     type Error = convert::Error;
 
+    /// A properly structured noun is:
+    ///
+    /// ```text
+    /// <req_num>
+    /// ```
+    ///
+    /// where `<req_num>` is the number of the inflight request to cancel.
     fn try_from(data: &Noun) -> Result<Self, Self::Error> {
         if let Noun::Atom(req_num) = data {
             Ok(Self {
@@ -415,6 +422,40 @@ impl TryFrom<HyperResponse> for Noun {
 mod tests {
     use super::*;
     use hyper::http::response;
+
+    /// Tests the `TryFrom<&Noun>` implementation for [`CancelRequest`].
+    #[test]
+    fn cancel_request_from_noun() {
+        // Request to cancel request 0.
+        {
+            let req_num = 0;
+            let noun = Noun::from(Atom::from(req_num));
+            let req = CancelRequest::try_from(&noun).expect("&Nount to CancelRequest");
+            assert_eq!(req.req_num, req_num);
+        }
+
+        // Request to cancel request 19659.
+        {
+            let req_num = 19659;
+            let noun = Noun::from(Atom::from(req_num));
+            let req = CancelRequest::try_from(&noun).expect("&Nount to CancelRequest");
+            assert_eq!(req.req_num, req_num);
+        }
+
+        // Malformed request: request number doesn't fit in `u64`.
+        {
+            let noun = Noun::from(Atom::from(
+                "this string can't possibly be interpreted as a number",
+            ));
+            assert!(CancelRequest::try_from(&noun).is_err());
+        }
+
+        // Malformed request: request number is a cell, not an atom.
+        {
+            let noun = Noun::from(Cell::from([11u8, 24u8]));
+            assert!(CancelRequest::try_from(&noun).is_err());
+        }
+    }
 
     #[test]
     fn noun_from_response() {
