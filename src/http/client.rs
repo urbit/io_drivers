@@ -608,5 +608,63 @@ mod tests {
             assert_eq!(req.req.uri().path(), "/");
             assert_eq!(req.req.headers().get(header.0).unwrap(), header.1);
         }
+
+        // Malformed request: request number is a cell, not an atom.
+        {
+            let noun = Noun::from(Cell::from([
+                Noun::from(Cell::from([24u8, 7u8])),
+                Noun::null(),
+            ]));
+            assert!(SendRequest::try_from(&noun).is_err());
+        }
+
+        // Malformed request: method is a cell, not an atom.
+        {
+            let noun = Noun::from(Cell::from([
+                Noun::from(Atom::from(57774u16)),
+                Noun::from(Cell::from(["G", "ET"])),
+                Noun::null(),
+            ]));
+            assert!(SendRequest::try_from(&noun).is_err());
+        }
+
+        // Malformed request: uri is cell, not an atom.
+        {
+            let noun = Noun::from(Cell::from([
+                Noun::from(Atom::from(338u16)),
+                Noun::from(Atom::from("PUT")),
+                Noun::from(Cell::from(["https", "://", "urbit.org", "/"])),
+                Noun::null(),
+            ]));
+            assert!(SendRequest::try_from(&noun).is_err());
+        }
+
+        // Malformed request: headers are a list of atoms, not of cells.
+        {
+            let noun = Noun::from(Cell::from([
+                Noun::from(Atom::from(4049991u32)),
+                Noun::from(Atom::from("POST")),
+                Noun::from(Atom::from("https://urbit.org")),
+                Noun::from(Cell::from([
+                    Atom::from("Content-Type"),
+                    Atom::from("application/json"),
+                    Atom::null(),
+                ])),
+                Noun::null(),
+            ]));
+            assert!(SendRequest::try_from(&noun).is_err());
+        }
+
+        // Malformed request: body cell is missing leading null.
+        {
+            let noun = Noun::from(Cell::from([
+                Noun::from(Atom::from(274461u32)),
+                Noun::from(Atom::from("GET")),
+                Noun::from(Atom::from("http://www.lmdb.tech")),
+                Noun::null(),
+                Noun::from(Cell::from([Atom::from(5u8), Atom::from("hello")])),
+            ]));
+            assert!(SendRequest::try_from(&noun).is_err());
+        }
     }
 }
