@@ -4,7 +4,6 @@ use noun::{
 };
 use std::{
     io::{Read, Write},
-    mem::size_of,
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
 };
 
@@ -17,6 +16,7 @@ pub(crate) fn spawn_driver(driver: &'static str) -> Child {
         .arg(driver)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
         .spawn()
         .expect("spawn io_drivers process")
 }
@@ -26,7 +26,6 @@ pub(crate) fn write_request(input: &mut ChildStdin, req: Noun) {
     let req = req.jam().into_vec();
 
     // Write the little-endian request length.
-    assert!(req.len() >= size_of::<u64>());
     let len = req.len().to_le_bytes();
     input.write_all(&len[..]).expect("write request length");
 

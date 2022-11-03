@@ -8,12 +8,12 @@ authors = ["Peter McEvoy <peter@tlon.io>"]
 crate-type = ["lib", "staticlib"]
 
 [dependencies]
-env_logger = "0.9"
 hyper = { version = "0.14", features = ["client"], optional = true }
 hyper-rustls = { version = "0.23", optional = true }
 log = { version = "0.4", features = ["release_max_level_warn"] }
 noun = { git = "https://github.com/urbit/noun.git", branch = "master", features = ["thread-safe"] }
 rustls = { version = "0.20", optional = true }
+simplelog = "0.12"
 tokio = { version = "1", features = ["io-std", "io-util", "rt-multi-thread", "sync"] }
 
 [features]

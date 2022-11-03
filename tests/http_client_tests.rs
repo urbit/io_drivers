@@ -5,6 +5,7 @@
 //! pipe.
 
 use noun::{convert, Atom, Cell, Noun};
+use std::{sync::mpsc, thread, time::Duration};
 
 mod common;
 
@@ -13,8 +14,8 @@ mod common;
 fn send_request() {
     let mut driver = common::spawn_driver("http-client");
 
-    let mut stdin = driver.stdin.take().unwrap();
-    let mut stdout = driver.stdout.take().unwrap();
+    let mut input = driver.stdin.take().unwrap();
+    let mut output = driver.stdout.take().unwrap();
 
     // This HTTP request can be replicated from the command line:
     //
@@ -38,8 +39,8 @@ fn send_request() {
             Noun::null(),
         ]));
 
-        common::write_request(&mut stdin, req);
-        if let Noun::Cell(resp) = common::read_response(&mut stdout) {
+        common::write_request(&mut input, req);
+        if let Noun::Cell(resp) = common::read_response(&mut output) {
             let [num, status, headers, _body] = resp.to_array::<4>().expect("response to array");
             assert!(common::check_u64(&num, req_num));
             assert!(common::check_u64(&status, 200));
@@ -107,8 +108,8 @@ fn send_request() {
             ])),
         ]));
 
-        common::write_request(&mut stdin, req);
-        if let Noun::Cell(resp) = common::read_response(&mut stdout) {
+        common::write_request(&mut input, req);
+        if let Noun::Cell(resp) = common::read_response(&mut output) {
             let [num, status, headers, body] = resp.to_array::<4>().expect("response to array");
             assert!(common::check_u64(&num, req_num));
             assert!(common::check_u64(&status, 200));
@@ -159,8 +160,8 @@ fn send_request() {
             Noun::null(),
         ]));
 
-        common::write_request(&mut stdin, req);
-        if let Noun::Cell(resp) = common::read_response(&mut stdout) {
+        common::write_request(&mut input, req);
+        if let Noun::Cell(resp) = common::read_response(&mut output) {
             let [num, status, _headers, _body] = resp.to_array::<4>().expect("response to array");
             assert!(common::check_u64(&num, req_num));
             assert!(common::check_u64(&status, 405));
@@ -172,5 +173,53 @@ fn send_request() {
 
 #[test]
 fn cancel_request() {
-    {}
+    let mut driver = common::spawn_driver("http-client");
+
+    let mut input = driver.stdin.take().unwrap();
+    let mut output = driver.stdout.take().unwrap();
+
+    {
+        let req_num = 1443u16;
+        let req = Noun::from(Cell::from([
+            // Tag.
+            Noun::from(Atom::from("request")),
+            // Request number.
+            Noun::from(Atom::from(req_num)),
+            // HTTP method.
+            Noun::from(Atom::from("GET")),
+            // HTTP URI.
+            Noun::from(Atom::from(
+                "https://bootstrap.urbit.org/props/1.10/brass.pill",
+            )),
+            // HTTP headers.
+            Noun::null(),
+            // HTTP body.
+            Noun::null(),
+        ]));
+
+        let cancel_req = Noun::from(Cell::from([
+            Noun::from(Atom::from("cancel-request")),
+            Noun::from(Atom::from(req_num)),
+        ]));
+        common::write_request(&mut input, req);
+        common::write_request(&mut input, cancel_req);
+
+        let (done_tx, done_rx) = mpsc::channel();
+        // Spawn a thread to read the response and then notify the main thread.
+        thread::spawn(move || {
+            let _ = common::read_response(&mut output);
+            done_tx.send(()).expect("send");
+        });
+
+        // Conclude that we successfully cancelled the request if we still haven't heard from the
+        // response thread in 5s.
+        assert_eq!(
+            done_rx.recv_timeout(Duration::from_secs(5)),
+            Err(mpsc::RecvTimeoutError::Timeout),
+        );
+
+        // The thread we spawned can't be joined since it's stuck attempting to read a response
+        // that will never come, so we leave it under the assumption that the entire process is
+        // cleaned up shortly after anyway.
+    }
 }
