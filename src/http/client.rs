@@ -1,3 +1,47 @@
+//! HTTP client driver.
+//!
+//! This module implements the HTTP client IO driver, which is responsible for sending HTTP
+//! requests on behalf of an [Arvo] kernel. Each request to the driver arrives as a length-encoded
+//! jammed (i.e. serialized) noun from some input source--`stdin`, a socket, etc. The driver
+//! understands two types of requests:
+//! - send an HTTP request (i.e. an [Arvo] `%request`) and
+//! - cancel an existing HTTP request (i.e. an [Arvo] `%cancel-request`).
+//!
+//! ### `%request`
+//!
+//! A jammed noun representing a `%request` request has the following structure:
+//! ```text
+//! [
+//!   %request
+//!   <req_num>
+//!   <method>
+//!   <uri>
+//!   <headers>
+//!   <body>
+//! ]
+//! ```
+//! `%request` requests generate responses, which are written to the driver's output sink. A
+//! `%request` response takes the form:
+//! ```text
+//! [
+//!   <req_num>
+//!   <status>
+//!   <headers>
+//!   <body>
+//! ]
+//! ```
+//!
+//! ### `%cancel-request`
+//!
+//! A jammed noun representing a `%cancel-request` request has the following structure:
+//! ```text
+//! [%cancel-request <req_num>]
+//! ```
+//! `%cancel-request` requests do not generate responses.
+//!
+//!
+//! [Arvo]: https://developers.urbit.org/reference/arvo
+
 use crate::{atom_as_str, Driver, Status};
 use hyper::{
     body::{self, Bytes},
@@ -374,6 +418,16 @@ struct HyperResponse {
 impl TryFrom<HyperResponse> for Noun {
     type Error = header::ToStrError;
 
+    /// The resulting noun is:
+    ///
+    /// ```text
+    /// [
+    ///   <req_num>
+    ///   <status>
+    ///   <headers>
+    ///   <body>
+    /// ]
+    /// ```
     fn try_from(resp: HyperResponse) -> Result<Self, Self::Error> {
         let req_num = Rc::<Noun>::from(Atom::from(resp.req_num));
         let status = Rc::<Noun>::from(Atom::from(resp.parts.status.as_u16()));
