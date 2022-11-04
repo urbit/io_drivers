@@ -1,3 +1,5 @@
+//! Utilities shared by integration tests.
+
 use noun::{
     serdes::{Cue, Jam},
     Atom, Noun,

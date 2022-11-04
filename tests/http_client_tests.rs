@@ -1,8 +1,9 @@
-//! Tests the HTTP client driver. The general pattern for each test is to launch the HTTP client
-//! driver in a subprocess with piped `stdin` and `stdout` via the crate's
-//! binary (defined in `src/main.rs`) and write HTTP client requests to the driver over the
-//! subprocess's `stdin` pipe and read responses to those requests over the subprocess's `stdout`
-//! pipe.
+//! Tests the HTTP client driver.
+//!
+//! The general pattern for each test is to launch the HTTP client driver in a subprocess with piped
+//! `stdin` and `stdout` via the crate's binary (defined in `src/main.rs`) and write HTTP client
+//! requests to the driver over the subprocess's `stdin` pipe and read responses to those requests
+//! over the subprocess's `stdout` pipe.
 
 use noun::{convert, Atom, Cell, Noun};
 use std::{path::Path, sync::mpsc, thread, time::Duration};
