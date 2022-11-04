@@ -1,3 +1,47 @@
+//! HTTP client driver.
+//!
+//! This module implements the HTTP client IO driver, which is responsible for sending HTTP
+//! requests on behalf of an [Arvo] kernel. Each request to the driver arrives as a length-encoded
+//! jammed (i.e. serialized) noun from some input source--`stdin`, a socket, etc. The driver
+//! understands two types of requests:
+//! - send an HTTP request (i.e. an [Arvo] `%request`) and
+//! - cancel an existing HTTP request (i.e. an [Arvo] `%cancel-request`).
+//!
+//! ### `%request`
+//!
+//! A jammed noun representing a `%request` request has the following structure:
+//! ```text
+//! [
+//!   %request
+//!   <req_num>
+//!   <method>
+//!   <uri>
+//!   <headers>
+//!   <body>
+//! ]
+//! ```
+//! `%request` requests generate responses, which are written to the driver's output sink. A
+//! `%request` response takes the form:
+//! ```text
+//! [
+//!   <req_num>
+//!   <status>
+//!   <headers>
+//!   <body>
+//! ]
+//! ```
+//!
+//! ### `%cancel-request`
+//!
+//! A jammed noun representing a `%cancel-request` request has the following structure:
+//! ```text
+//! [%cancel-request <req_num>]
+//! ```
+//! `%cancel-request` requests do not generate responses.
+//!
+//!
+//! [Arvo]: https://developers.urbit.org/reference/arvo
+
 use crate::{atom_as_str, Driver, Status};
 use hyper::{
     body::{self, Bytes},
@@ -43,6 +87,36 @@ struct SendRequest {
 impl TryFrom<&Noun> for SendRequest {
     type Error = convert::Error;
 
+    /// A properly structured noun is:
+    ///
+    /// ```text
+    /// [
+    ///   <req_num>
+    ///   <method>
+    ///   <uri>
+    ///   <headers>
+    ///   <body>
+    /// ]
+    /// ```
+    ///
+    /// where `<req_num>` is the request number, `<method>` is the HTTP method, `<uri>` is the HTTP
+    /// URI, `<headers>` is a null-terminated list of HTTP request headers of the form
+    ///
+    /// ```text
+    /// [
+    ///   [key0 val0]
+    ///   ...
+    ///   [keyN valN]
+    ///   ~
+    /// ]
+    /// ```,
+    ///
+    /// and `<body>` is an HTTP request body, which is either null (i.e. an empty request body), or
+    /// non-null, in which case it's of the form
+    ///
+    /// ```text
+    /// [~ <body_len> <body>]
+    /// ```.
     fn try_from(data: &Noun) -> Result<Self, Self::Error> {
         if let Noun::Cell(data) = data {
             let [req_num, method, uri, headers, body] =
@@ -115,6 +189,13 @@ struct CancelRequest {
 impl TryFrom<&Noun> for CancelRequest {
     type Error = convert::Error;
 
+    /// A properly structured noun is:
+    ///
+    /// ```text
+    /// <req_num>
+    /// ```
+    ///
+    /// where `<req_num>` is the number of the inflight request to cancel.
     fn try_from(data: &Noun) -> Result<Self, Self::Error> {
         if let Noun::Atom(req_num) = data {
             Ok(Self {
@@ -337,6 +418,16 @@ struct HyperResponse {
 impl TryFrom<HyperResponse> for Noun {
     type Error = header::ToStrError;
 
+    /// The resulting noun is:
+    ///
+    /// ```text
+    /// [
+    ///   <req_num>
+    ///   <status>
+    ///   <headers>
+    ///   <body>
+    /// ]
+    /// ```
     fn try_from(resp: HyperResponse) -> Result<Self, Self::Error> {
         let req_num = Rc::<Noun>::from(Atom::from(resp.req_num));
         let status = Rc::<Noun>::from(Atom::from(resp.parts.status.as_u16()));
@@ -386,6 +477,40 @@ mod tests {
     use super::*;
     use hyper::http::response;
 
+    /// Tests the `TryFrom<&Noun>` implementation for [`CancelRequest`].
+    #[test]
+    fn cancel_request_from_noun() {
+        // Request to cancel request 0.
+        {
+            let req_num = 0;
+            let noun = Noun::from(Atom::from(req_num));
+            let req = CancelRequest::try_from(&noun).expect("&Nount to CancelRequest");
+            assert_eq!(req.req_num, req_num);
+        }
+
+        // Request to cancel request 19659.
+        {
+            let req_num = 19659;
+            let noun = Noun::from(Atom::from(req_num));
+            let req = CancelRequest::try_from(&noun).expect("&Nount to CancelRequest");
+            assert_eq!(req.req_num, req_num);
+        }
+
+        // Malformed request: request number doesn't fit in `u64`.
+        {
+            let noun = Noun::from(Atom::from(
+                "this string can't possibly be interpreted as a number",
+            ));
+            assert!(CancelRequest::try_from(&noun).is_err());
+        }
+
+        // Malformed request: request number is a cell, not an atom.
+        {
+            let noun = Noun::from(Cell::from([11u8, 24u8]));
+            assert!(CancelRequest::try_from(&noun).is_err());
+        }
+    }
+
     #[test]
     fn noun_from_response() {
         // [
@@ -433,32 +558,14 @@ mod tests {
                 Noun::from(Atom::from(req_num)),
                 Noun::from(Atom::from(200u8)),
                 Noun::from(Cell::from([
-                    Noun::from(Cell::from([
-                        Atom::from("server"),
-                        Atom::from("nginx/1.14.0 (Ubuntu)"),
-                    ])),
-                    Noun::from(Cell::from([
-                        Atom::from("date"),
-                        Atom::from("Fri, 08 Jul 2022 16:43:50 GMT"),
-                    ])),
-                    Noun::from(Cell::from([
-                        Atom::from("content-type"),
-                        Atom::from("application/json"),
-                    ])),
-                    Noun::from(Cell::from([
-                        Atom::from("content-length"),
-                        Atom::from("14645"),
-                    ])),
-                    Noun::from(Cell::from([
-                        Atom::from("connection"),
-                        Atom::from("keep-alive"),
-                    ])),
-                    Noun::from(Cell::from([
-                        Atom::from("vary"),
-                        Atom::from("Accept-Encoding"),
-                    ])),
-                    Noun::from(Cell::from([Atom::from("vary"), Atom::from("Origin")])),
-                    Noun::from(Cell::from([Atom::from("x-cached"), Atom::from("HIT")])),
+                    Noun::from(Cell::from(["server", "nginx/1.14.0 (Ubuntu)"])),
+                    Noun::from(Cell::from(["date", "Fri, 08 Jul 2022 16:43:50 GMT"])),
+                    Noun::from(Cell::from(["content-type", "application/json"])),
+                    Noun::from(Cell::from(["content-length", "14645"])),
+                    Noun::from(Cell::from(["connection", "keep-alive"])),
+                    Noun::from(Cell::from(["vary", "Accept-Encoding"])),
+                    Noun::from(Cell::from(["vary", "Origin"])),
+                    Noun::from(Cell::from(["x-cached", "HIT"])),
                     Noun::from(Atom::from(0u8)),
                 ])),
                 Noun::from(Cell::from([
@@ -471,6 +578,147 @@ mod tests {
             // If this test starts failing, it may be because the headers are in a different
             // (though still correct order).
             assert_eq!(noun, expected);
+        }
+    }
+
+    /// Tests the `TryFrom<&Noun>` implementation for [`SendRequest`].
+    #[test]
+    fn send_request_from_noun() {
+        // GET request to https://archlinux.org/.
+        {
+            let req_num = 137;
+            let method = "GET";
+            let uri_scheme = "https";
+            let uri_authority = "archlinux.org";
+            let uri_path = "/";
+            let uri = format!("{}://{}{}", uri_scheme, uri_authority, uri_path);
+            let noun = Noun::from(Cell::from([
+                Noun::from(Atom::from(req_num)),
+                Noun::from(Atom::from(method)),
+                Noun::from(Atom::from(uri)),
+                Noun::null(),
+                Noun::null(),
+            ]));
+            let req = SendRequest::try_from(&noun).expect("&Noun to SendRequest");
+            assert_eq!(req.req_num, req_num);
+            assert_eq!(req.req.method().as_str(), method);
+            assert_eq!(req.req.uri().scheme_str().unwrap(), uri_scheme);
+            assert_eq!(req.req.uri().authority().unwrap(), uri_authority);
+            assert_eq!(req.req.uri().path(), uri_path);
+        }
+
+        // GET request to http://www.lmdb.tech/doc/starting.html.
+        {
+            let req_num = 5918;
+            let method = "GET";
+            let uri_scheme = "http";
+            let uri_authority = "www.lmdb.tech";
+            let uri_path = "/doc/starting.html";
+            let uri = format!("{}://{}{}", uri_scheme, uri_authority, uri_path);
+            let noun = Noun::from(Cell::from([
+                Noun::from(Atom::from(req_num)),
+                Noun::from(Atom::from(method)),
+                Noun::from(Atom::from(uri)),
+                Noun::null(),
+                Noun::null(),
+            ]));
+            let req = SendRequest::try_from(&noun).expect("&Noun to SendRequest");
+            assert_eq!(req.req_num, req_num);
+            assert_eq!(req.req.method().as_str(), method);
+            assert_eq!(req.req.uri().scheme_str().unwrap(), uri_scheme);
+            assert_eq!(req.req.uri().authority().unwrap(), uri_authority);
+            assert_eq!(req.req.uri().path(), uri_path);
+        }
+
+        // POST request to http://eth-mainnet.urbit.org:8545.
+        {
+            let req_num = 143;
+            let method = "POST";
+            let uri_scheme = "http";
+            let uri_authority = "eth-mainnet.urbit.org:8545";
+            let uri = format!("{}://{}", uri_scheme, uri_authority);
+            let header = ("Content-Type", "application/json");
+            let noun = Noun::from(Cell::from([
+                Noun::from(Atom::from(req_num)),
+                Noun::from(Atom::from(method)),
+                Noun::from(Atom::from(uri)),
+                Noun::from(Cell::from([
+                    Noun::from(Cell::from([header.0, header.1])),
+                    Noun::null(),
+                ])),
+                Noun::from(Cell::from([
+                    Atom::null(),
+                    Atom::from(153u8),
+                    Atom::from(
+                        r#"[{"params":["0x82c8ca06fe8094fefaccaaf3a1be8522414c1a77a7dd281c9bf42b282b304e2b"],"id":"tx by hash","jsonrpc":"2.0","method":"eth_getTransactionByHash"}]"#,
+                    ),
+                ])),
+            ]));
+            let req = SendRequest::try_from(&noun).expect("&Noun to SendRequest");
+            assert_eq!(req.req_num, req_num);
+            assert_eq!(req.req.method().as_str(), method);
+            assert_eq!(req.req.uri().scheme_str().unwrap(), uri_scheme);
+            assert_eq!(req.req.uri().authority().unwrap(), uri_authority);
+            assert_eq!(req.req.uri().path(), "/");
+            assert_eq!(req.req.headers().get(header.0).unwrap(), header.1);
+        }
+
+        // Malformed request: request number is a cell, not an atom.
+        {
+            let noun = Noun::from(Cell::from([
+                Noun::from(Cell::from([24u8, 7u8])),
+                Noun::null(),
+            ]));
+            assert!(SendRequest::try_from(&noun).is_err());
+        }
+
+        // Malformed request: method is a cell, not an atom.
+        {
+            let noun = Noun::from(Cell::from([
+                Noun::from(Atom::from(57774u16)),
+                Noun::from(Cell::from(["G", "ET"])),
+                Noun::null(),
+            ]));
+            assert!(SendRequest::try_from(&noun).is_err());
+        }
+
+        // Malformed request: uri is cell, not an atom.
+        {
+            let noun = Noun::from(Cell::from([
+                Noun::from(Atom::from(338u16)),
+                Noun::from(Atom::from("PUT")),
+                Noun::from(Cell::from(["https", "://", "urbit.org", "/"])),
+                Noun::null(),
+            ]));
+            assert!(SendRequest::try_from(&noun).is_err());
+        }
+
+        // Malformed request: headers are a list of atoms, not of cells.
+        {
+            let noun = Noun::from(Cell::from([
+                Noun::from(Atom::from(4049991u32)),
+                Noun::from(Atom::from("POST")),
+                Noun::from(Atom::from("https://urbit.org")),
+                Noun::from(Cell::from([
+                    Atom::from("Content-Type"),
+                    Atom::from("application/json"),
+                    Atom::null(),
+                ])),
+                Noun::null(),
+            ]));
+            assert!(SendRequest::try_from(&noun).is_err());
+        }
+
+        // Malformed request: body cell is missing leading null.
+        {
+            let noun = Noun::from(Cell::from([
+                Noun::from(Atom::from(274461u32)),
+                Noun::from(Atom::from("GET")),
+                Noun::from(Atom::from("http://www.lmdb.tech")),
+                Noun::null(),
+                Noun::from(Cell::from([Atom::from(5u8), Atom::from("hello")])),
+            ]));
+            assert!(SendRequest::try_from(&noun).is_err());
         }
     }
 }

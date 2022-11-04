@@ -1,6 +1,7 @@
-/// Implements `TryFrom<&Noun>` for the request enum of a driver, which enumerates all of the
-/// different types of requests that driver may handle, with minimal boilerplate. A properly
-/// structured noun is:
+/// Implements `TryFrom<&Noun>` for the request enum of a driver.
+///
+/// The request enum of a driver enumerates all of the different types of requests that driver may
+/// handle, with minimal boilerplate. A properly structured noun is:
 ///
 /// ```text
 /// [<tag> <data>]
@@ -69,8 +70,10 @@ macro_rules! impl_try_from_noun_for_request {
 }
 
 #[cfg(feature = "file-system")]
+/// File system.
 pub mod fs;
 #[cfg(feature = "http-client")]
+/// HTTP client and server.
 pub mod http;
 
 use log::{debug, error, info, warn};

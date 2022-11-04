@@ -28,6 +28,12 @@ To build and run the test suite, run:
 $ cargo test
 ```
 
+The test suite includes integration tests, which execute the binary defined by
+`src/main.rs` in a subprocess. Logging output from the binary when executed as a
+subprocess is captured in `<test_fn_name>.<test_file_name>.log`. For example,
+the logging output from the binary when running the `send_request()` test in
+`tests/http_client_tests.rs` ends up in `send_request.http_client_tests.log`.
+
 To build and view the documentation, run:
 ```console
 $ cargo doc --open
