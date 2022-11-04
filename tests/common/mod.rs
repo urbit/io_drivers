@@ -4,19 +4,23 @@ use noun::{
 };
 use std::{
     io::{Read, Write},
+    path::Path,
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
 };
 
 /// Spawns an IO driver in a subprocess with piped `stdin` and `stdout`.
-pub(crate) fn spawn_driver(driver: &'static str) -> Child {
+pub(crate) fn spawn_driver(driver: &'static str, log_file: &Path) -> Child {
     // Absolute path to the binary defined by `src/main.rs`.
     const BINARY: &'static str = env!("CARGO_BIN_EXE_io_drivers");
+
+    const LOG_VAR: &'static str = "URBIT_IO_DRIVERS_LOG";
 
     Command::new(BINARY)
         .arg(driver)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
+        .env(LOG_VAR, log_file)
         .spawn()
         .expect("spawn io_drivers process")
 }

@@ -30,14 +30,9 @@ $ cargo test
 
 The test suite includes integration tests, which execute the binary defined by
 `src/main.rs` in a subprocess. Logging output from the binary when executed as a
-subprocess can be captured by defining the `URBIT_IO_DRIVERS_LOG` environment
-variable. For example:
-```console
-$ URBIT_IO_DRIVERS_LOG=test.log cargo test
-```
-Note that each `#[test]` test defined in files in `tests/` will spawn a unique
-version of the binary, which means that logging output will likely be
-interleaved.
+subprocess is captured in `<test_fn_name>.<test_file_name>.log`. For example,
+the logging output from the binary when running the `send_request()` test in
+`tests/http_client_tests.rs` ends up in `send_request.http_client_tests.log`.
 
 To build and view the documentation, run:
 ```console

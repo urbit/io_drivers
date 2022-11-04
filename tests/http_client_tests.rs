@@ -5,14 +5,17 @@
 //! pipe.
 
 use noun::{convert, Atom, Cell, Noun};
-use std::{sync::mpsc, thread, time::Duration};
+use std::{path::Path, sync::mpsc, thread, time::Duration};
 
 mod common;
 
 /// Sends `%request` requests to the HTTP client driver.
 #[test]
 fn send_request() {
-    let mut driver = common::spawn_driver("http-client");
+    let mut driver = common::spawn_driver(
+        "http-client",
+        Path::new("send_request.http_client_tests.log"),
+    );
 
     let mut input = driver.stdin.take().unwrap();
     let mut output = driver.stdout.take().unwrap();
@@ -173,7 +176,10 @@ fn send_request() {
 
 #[test]
 fn cancel_request() {
-    let mut driver = common::spawn_driver("http-client");
+    let mut driver = common::spawn_driver(
+        "http-client",
+        Path::new("cancel_request.http_client_tests.log"),
+    );
 
     let mut input = driver.stdin.take().unwrap();
     let mut output = driver.stdout.take().unwrap();
