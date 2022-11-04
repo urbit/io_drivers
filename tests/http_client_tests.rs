@@ -18,8 +18,8 @@ fn send_request() {
         Path::new("send_request.http_client_tests.log"),
     );
 
-    let mut input = driver.stdin.take().unwrap();
-    let mut output = driver.stdout.take().unwrap();
+    let mut input = driver.0.stdin.take().unwrap();
+    let mut output = driver.0.stdout.take().unwrap();
 
     // This HTTP request can be replicated from the command line:
     //
@@ -182,8 +182,8 @@ fn cancel_request() {
         Path::new("cancel_request.http_client_tests.log"),
     );
 
-    let mut input = driver.stdin.take().unwrap();
-    let mut output = driver.stdout.take().unwrap();
+    let mut input = driver.0.stdin.take().unwrap();
+    let mut output = driver.0.stdout.take().unwrap();
 
     {
         let req_num = 1443u16;
