@@ -427,7 +427,7 @@ macro_rules! impl_driver {
     ($input_src:ty, $output_sink:ty) => {
         impl Driver<$input_src, $output_sink> for FileSystem {
             fn new() -> Result<Self, Status> {
-                todo!()
+                Ok(Self { mount_points: HashMap::new() })
             }
 
             fn name() -> &'static str {
@@ -476,6 +476,16 @@ macro_rules! impl_driver {
 }
 
 impl_driver!(Stdin, Stdout);
+
+/// Provides an FFI-friendly interface for running the file system driver with `stdin` as the input
+/// source and `stdout` as the output sink.
+#[no_mangle]
+pub extern "C" fn fs_run() -> Status {
+    match FileSystem::new() {
+        Ok(driver) => driver.run(tokio::io::stdin(), tokio::io::stdout()),
+        Err(status) => status,
+    }
+}
 
 //==================================================================================================
 // Path Manipulation
