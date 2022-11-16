@@ -34,7 +34,9 @@ pub(crate) fn spawn_driver(
     let cwd = env::current_dir().unwrap();
     let dir = dir.unwrap_or(&cwd);
     let log_file: PathBuf = [&cwd, Path::new("tests"), log_file].iter().collect();
-    fs::remove_file(&log_file).expect("remove log file");
+    if log_file.exists() {
+        fs::remove_file(&log_file).expect("remove log file");
+    }
 
     let mut driver = DriverProcess(
         Command::new(BINARY)
