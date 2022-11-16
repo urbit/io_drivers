@@ -5,7 +5,7 @@ use noun::{
     Atom, Noun,
 };
 use std::{
-    env,
+    env, fs,
     io::{Read, Write},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
@@ -33,6 +33,8 @@ pub(crate) fn spawn_driver(
 
     let cwd = env::current_dir().unwrap();
     let dir = dir.unwrap_or(&cwd);
+    let log_file: PathBuf = [&cwd, Path::new("tests"), log_file].iter().collect();
+    fs::remove_file(&log_file).expect("remove log file");
 
     let mut driver = DriverProcess(
         Command::new(BINARY)
@@ -41,12 +43,7 @@ pub(crate) fn spawn_driver(
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
-            .env(
-                LOG_VAR,
-                [&cwd, Path::new("tests"), log_file]
-                    .iter()
-                    .collect::<PathBuf>(),
-            )
+            .env(LOG_VAR, log_file)
             .spawn()
             .expect("spawn io_drivers process"),
     );
