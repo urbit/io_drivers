@@ -384,6 +384,18 @@ impl FileSystem {
                 Change::EditFile { path, bytes } => {
                     let path: PathBuf = [&mount_point.path, &path].iter().collect();
 
+                    // Create the file's parent directory.
+                    let parent = path.parent().unwrap();
+                    if let Err(err) = fs::create_dir_all(parent) {
+                        warn!(
+                            target: Self::name(),
+                            "failed to create {}: {}",
+                            parent.display(),
+                            err,
+                        );
+                        continue;
+                    }
+
                     let new_hash = Hash::from(&bytes[..]);
                     // Don't update the file if the hash hasn't changed.
                     if let Some(Some(old_hash)) = mount_point.entries.get(&path) {
