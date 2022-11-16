@@ -21,6 +21,74 @@ const CWD: &'static str = "/tmp";
 #[cfg(target_os = "windows")]
 const CWD: &'static str = env!("TEMP");
 
+/// Compares the contents of a change to an `expected_path` and
+/// `expected_contents`, panicking if the change doesn't match `expected_path`
+/// and `expected_contents`.
+///
+/// If a change adds/edits a file, it's of the form:
+/// ```text
+/// [
+///   <path>
+///   0
+///   [[%text %plain 0] <byte_len> <bytes>]
+/// ]
+/// ```
+///
+/// if the change adds/edits a file or
+///
+/// If a change removes a file, it's of the form:
+/// ```text
+/// [<path> 0]
+/// ```
+fn assert_change(change: &Noun, expected_path: &[&str], expected_contents: Option<&str>) {
+    if let Noun::Cell(change) = change {
+        let path = convert!(change.head_ref() => Vec<&str>).expect("path to Vec");
+        assert_eq!(path.len(), expected_path.len());
+        for i in 0..path.len() {
+            assert_eq!(path[i], expected_path[i]);
+        }
+
+        match change.tail_ref() {
+            // Change removes a file.
+            Noun::Atom(null) => {
+                assert!(expected_contents.is_none());
+                assert!(null.is_null())
+            }
+            // Change adds/edits a file.
+            Noun::Cell(change) => {
+                assert!(expected_contents.is_some());
+                let expected_contents = expected_contents.unwrap();
+                assert!(change.head_ref().is_null());
+                if let Noun::Cell(change) = change.tail_ref() {
+                    let [file_type, byte_len, bytes] =
+                        change.to_array::<3>().expect("change to array");
+                    let file_type = convert!(&*file_type => Vec<&str>).expect("file type to Vec");
+                    assert_eq!(file_type.len(), 2);
+                    assert_eq!(file_type[0], "text");
+                    assert_eq!(file_type[1], "plain");
+                    if let Noun::Atom(byte_len) = &*byte_len {
+                        assert_eq!(
+                            byte_len.as_usize().expect("byte_len to usize"),
+                            expected_contents.len()
+                        );
+                    } else {
+                        panic!("byte len is a cell");
+                    }
+                    if let Noun::Atom(bytes) = &*bytes {
+                        assert_eq!(bytes.as_str().expect("bytes to str"), expected_contents);
+                    } else {
+                        panic!("bytes is a cell");
+                    }
+                } else {
+                    panic!("change's tail's tail is an atom");
+                }
+            }
+        }
+    } else {
+        panic!("change is an atom");
+    }
+}
+
 /// Compares the contents of a [`File`] to a [`&str`], returning `true` if the [`File`] contents
 /// and the [`&str`] are identical and `false` otherwise.
 fn check_file_contents(path: &Path, expected: &str) -> bool {
@@ -66,41 +134,78 @@ fn commit_mount_point() {
         common::write_request(&mut input, req);
         if let Noun::Cell(resp) = common::read_response(&mut output) {
             let [change, null] = resp.to_array::<2>().expect("response to array");
-
+            assert_change(&*change, &["example", "txt"], Some(CONTENTS));
             assert!(null.is_null());
-            if let Noun::Cell(change) = &*change {
-                let [path, null, change] = change.to_array::<3>().expect("change to array");
-                assert!(null.is_null());
-                let path = convert!(&*path => Vec<&str>).expect("path to Vec");
-                assert_eq!(path.len(), 2);
-                assert_eq!(path[0], "example");
-                assert_eq!(path[1], "txt");
-                if let Noun::Cell(change) = &*change {
-                    let [file_type, byte_len, bytes] =
-                        change.to_array::<3>().expect("change to array");
-                    let file_type = convert!(&*file_type => Vec<&str>).expect("file type to Vec");
-                    assert_eq!(file_type.len(), 2);
-                    assert_eq!(file_type[0], "text");
-                    assert_eq!(file_type[1], "plain");
-                    if let Noun::Atom(byte_len) = &*byte_len {
-                        assert_eq!(
-                            byte_len.as_usize().expect("byte_len to usize"),
-                            CONTENTS.len()
-                        );
-                    } else {
-                        panic!("byte len is a cell");
-                    }
-                    if let Noun::Atom(bytes) = &*bytes {
-                        assert_eq!(bytes.as_str().expect("bytes to str"), CONTENTS);
-                    } else {
-                        panic!("bytes is a cell");
-                    }
-                } else {
-                    panic!("change is an atom");
-                }
-            } else {
-                panic!("change is an atom");
-            }
+        } else {
+            panic!("response is an atom");
+        }
+    }
+
+    assert!(delete_mount_point(MOUNT_POINT, &mut input));
+}
+
+/// Sends `%hill` requests to the file system driver.
+#[test]
+fn scan_mount_points() {
+    let (mut driver, mut input, mut output) = common::spawn_driver(
+        "fs",
+        Some(Path::new(CWD)),
+        Path::new("scan_mount_points.fs_tests.log"),
+    );
+
+    const MOUNT_POINT: &'static str = "landscape";
+    const MAIN_CONTENTS: &'static str = "int main(int argc, char *argv[]) { return 0; }";
+
+    // Create file tree rooted at mount point.
+    {
+        let mut path: PathBuf = [CWD, MOUNT_POINT].iter().collect();
+
+        path.push("main.c");
+        fs::create_dir_all(path.parent().expect("parent")).expect("create dirs");
+        fs::write(&path, MAIN_CONTENTS).expect("write");
+        path.pop(); // pop `main.c`
+
+        path.push("a/notes.md");
+        fs::create_dir_all(path.parent().expect("parent")).expect("create dirs");
+        fs::write(&path, "Buy nutella and graham grackers at the store.").expect("write");
+        path.pop(); // pop `notes.md`
+
+        path.push("b/inc.hoon");
+        fs::create_dir_all(path.parent().expect("parent")).expect("create dirs");
+        fs::write(&path, "|=  a=@  +(a)").expect("write");
+        path.pop(); // pop `b/`
+        path.pop(); // pop `a/`
+    }
+
+    // Scan mount point.
+    {
+        let req = Noun::from(Cell::from([
+            Noun::from(Atom::from("hill")),
+            Noun::from(Atom::from(MOUNT_POINT)),
+            Noun::null(),
+        ]));
+        common::write_request(&mut input, req);
+        // Ensure the request gets processed before running the assertions.
+        thread::sleep(Duration::from_millis(100));
+    }
+
+    // Delete a directory within the mount point.
+    {
+        let path: PathBuf = [CWD, MOUNT_POINT, "a"].iter().collect();
+        fs::remove_dir_all(&path).expect("remove dirs");
+    }
+
+    // Commit mount point.
+    {
+        let req = Noun::from(Cell::from(["dirk", MOUNT_POINT]));
+        common::write_request(&mut input, req);
+        if let Noun::Cell(resp) = common::read_response(&mut output) {
+            let [change0, change1, change2, null] =
+                resp.to_array::<4>().expect("response to array");
+            assert_change(&*change1, &["a", "notes", "md"], None);
+            assert_change(&*change2, &["a", "b", "inc", "hoon"], None);
+            assert_change(&*change0, &["main", "c"], Some(MAIN_CONTENTS));
+            assert!(null.is_null());
         } else {
             panic!("response is an atom");
         }
