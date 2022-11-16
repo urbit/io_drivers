@@ -5,6 +5,7 @@ use noun::{
     Atom, Noun,
 };
 use std::{
+    env,
     io::{Read, Write},
     path::Path,
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
@@ -20,15 +21,23 @@ impl Drop for DriverProcess {
 }
 
 /// Spawns an IO driver in a subprocess with piped `stdin` and `stdout`.
-pub(crate) fn spawn_driver(driver: &'static str, log_file: &Path) -> DriverProcess {
+pub(crate) fn spawn_driver(
+    driver: &'static str,
+    dir: Option<&Path>,
+    log_file: &Path,
+) -> DriverProcess {
     // Absolute path to the binary defined by `src/main.rs`.
     const BINARY: &'static str = env!("CARGO_BIN_EXE_io_drivers");
 
     const LOG_VAR: &'static str = "URBIT_IO_DRIVERS_LOG";
 
+    let cwd = env::current_dir().unwrap();
+    let dir = dir.unwrap_or(&cwd);
+
     DriverProcess(
         Command::new(BINARY)
             .arg(driver)
+            .current_dir(dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
