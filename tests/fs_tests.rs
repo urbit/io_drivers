@@ -5,10 +5,11 @@
 //! system requests to the driver over the subprocess's `stdin` pipe and read responses to those
 //! requests over the subprocess's `stdout` pipe.
 
-use noun::{Atom, Cell, Noun};
+use noun::{convert, Atom, Cell, Noun};
 use std::{
     env, fs,
     path::{Path, PathBuf},
+    process::ChildStdin,
     thread,
     time::Duration,
 };
@@ -30,6 +31,87 @@ fn check_file_contents(path: &Path, expected: &str) -> bool {
     }
 }
 
+/// Deletes a mount point from the file system by sending an `%ogre` request to the file systme
+/// driver, returning `true` if the mount point was deleted and `false` otherwise.
+fn delete_mount_point(mount_point: &str, input: &mut ChildStdin) -> bool {
+    let req = Noun::from(Cell::from(["ogre", mount_point]));
+    common::write_request(input, req);
+    // Ensure the request gets processed before running the assertions.
+    thread::sleep(Duration::from_millis(100));
+
+    let path: PathBuf = [CWD, mount_point].iter().collect();
+    !path.exists()
+}
+
+/// Sends `%dirk` requests to the file system driver.
+#[test]
+fn commit_mount_point() {
+    let mut driver = common::spawn_driver(
+        "fs",
+        Some(Path::new(CWD)),
+        Path::new("commit_mount_point.fs_tests.log"),
+    );
+
+    let mut input = driver.0.stdin.take().unwrap();
+    let mut output = driver.0.stdout.take().unwrap();
+
+    const MOUNT_POINT: &'static str = "garden";
+
+    // Commit `example.txt`.
+    {
+        // Create `example.txt` by writing directly to the file system.
+        let path: PathBuf = [CWD, MOUNT_POINT, "example.txt"].iter().collect();
+        const CONTENTS: &'static str = "How strange it is to be anything at all.";
+        fs::create_dir_all(path.parent().expect("parent")).expect("create dirs");
+        fs::write(&path, CONTENTS).expect("write");
+
+        let req = Noun::from(Cell::from(["dirk", MOUNT_POINT]));
+        common::write_request(&mut input, req);
+        if let Noun::Cell(resp) = common::read_response(&mut output) {
+            let [change, null] = resp.to_array::<2>().expect("response to array");
+
+            assert!(null.is_null());
+            if let Noun::Cell(change) = &*change {
+                let [path, null, change] = change.to_array::<3>().expect("change to array");
+                assert!(null.is_null());
+                let path = convert!(&*path => Vec<&str>).expect("path to Vec");
+                assert_eq!(path.len(), 2);
+                assert_eq!(path[0], "example");
+                assert_eq!(path[1], "txt");
+                if let Noun::Cell(change) = &*change {
+                    let [file_type, byte_len, bytes] =
+                        change.to_array::<3>().expect("change to array");
+                    let file_type = convert!(&*file_type => Vec<&str>).expect("file type to Vec");
+                    assert_eq!(file_type.len(), 2);
+                    assert_eq!(file_type[0], "text");
+                    assert_eq!(file_type[1], "plain");
+                    if let Noun::Atom(byte_len) = &*byte_len {
+                        assert_eq!(
+                            byte_len.as_usize().expect("byte_len to usize"),
+                            CONTENTS.len()
+                        );
+                    } else {
+                        panic!("byte len is a cell");
+                    }
+                    if let Noun::Atom(bytes) = &*bytes {
+                        assert_eq!(bytes.as_str().expect("bytes to str"), CONTENTS);
+                    } else {
+                        panic!("bytes is a cell");
+                    }
+                } else {
+                    panic!("change is an atom");
+                }
+            } else {
+                panic!("change is an atom");
+            }
+        } else {
+            panic!("response is an atom");
+        }
+    }
+
+    assert!(delete_mount_point(MOUNT_POINT, &mut input));
+}
+
 /// Sends `%ergo` requests to the file system driver.
 #[test]
 fn update_file_system() {
@@ -42,30 +124,23 @@ fn update_file_system() {
     let mut input = driver.0.stdin.take().unwrap();
     let mut output = driver.0.stdout.take().unwrap();
 
-    const TAG: &'static str = "ergo";
     const MOUNT_POINT: &'static str = "base";
+
+    // `gen/vats.hoon`.
+    let file = convert!([&"gen", &"vats", &"hoon"].into_iter() => Noun).expect("path to Noun");
 
     // Create `gen/vats.hoon`.
     {
         let req = Noun::from(Cell::from([
             // Tag.
-            Noun::from(Atom::from(TAG)),
+            Noun::from(Atom::from("ergo")),
             // Mount point.
             Noun::from(Atom::from(MOUNT_POINT)),
             // Update `base/gen/vats.hoon`.
             Noun::from(Cell::from([
-                Noun::from(Cell::from([
-                    Noun::from(Atom::from("gen")),
-                    Noun::from(Atom::from("vats")),
-                    Noun::from(Atom::from("hoon")),
-                    Noun::null(),
-                ])),
+                file.clone(),
                 Noun::null(),
-                Noun::from(Cell::from([
-                    Noun::from(Atom::from("text")),
-                    Noun::from(Atom::from("x-hoon")),
-                    Noun::null(),
-                ])),
+                convert!([&"text", &"x-hoon"].into_iter() => Noun).expect("file type to Noun"),
                 Noun::from(Atom::from(112u8)),
                 Noun::from(Atom::from(vec![
                     0x2f, 0x2d, 0x20, 0x20, 0x2a, 0x68, 0x6f, 0x6f, 0x64, 0x0a, 0x3a, 0x2d, 0x20,
@@ -101,19 +176,11 @@ fn update_file_system() {
     {
         let req = Noun::from(Cell::from([
             // Tag.
-            Noun::from(Atom::from(TAG)),
+            Noun::from(Atom::from("ergo")),
             // Mount point.
             Noun::from(Atom::from(MOUNT_POINT)),
             // Delete `base/gen/vats.hoon`.
-            Noun::from(Cell::from([
-                Noun::from(Cell::from([
-                    Noun::from(Atom::from("gen")),
-                    Noun::from(Atom::from("vats")),
-                    Noun::from(Atom::from("hoon")),
-                    Noun::null(),
-                ])),
-                Noun::null(),
-            ])),
+            Noun::from(Cell::from([file, Noun::null()])),
             Noun::null(),
         ]));
         common::write_request(&mut input, req);
@@ -123,4 +190,6 @@ fn update_file_system() {
         let path: PathBuf = [CWD, MOUNT_POINT, "gen", "vats.hoon"].iter().collect();
         assert!(!path.exists());
     }
+
+    assert!(delete_mount_point(MOUNT_POINT, &mut input));
 }
