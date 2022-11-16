@@ -7,7 +7,7 @@ use noun::{
 use std::{
     env,
     io::{Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
 };
 
@@ -41,7 +41,12 @@ pub(crate) fn spawn_driver(
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
-            .env(LOG_VAR, log_file)
+            .env(
+                LOG_VAR,
+                [&cwd, Path::new("tests"), log_file]
+                    .iter()
+                    .collect::<PathBuf>(),
+            )
             .spawn()
             .expect("spawn io_drivers process"),
     );
