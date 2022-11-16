@@ -7,7 +7,7 @@
 
 use noun::{convert, Atom, Cell, Noun};
 use std::{
-    env, fs,
+    fs,
     path::{Path, PathBuf},
     process::ChildStdin,
     thread,
@@ -114,7 +114,7 @@ fn delete_mount_point(mount_point: &str, input: &mut ChildStdin) -> bool {
 /// Sends `%dirk` requests to the file system driver.
 #[test]
 fn commit_mount_point() {
-    let (mut driver, mut input, mut output) = common::spawn_driver(
+    let (_driver, mut input, mut output) = common::spawn_driver(
         "fs",
         Some(Path::new(CWD)),
         Path::new("commit_mount_point.fs_tests.log"),
@@ -147,7 +147,7 @@ fn commit_mount_point() {
 /// Sends `%ergo` requests to the file system driver.
 #[test]
 fn update_file_system() {
-    let (mut driver, mut input, mut output) = common::spawn_driver(
+    let (_driver, mut input, _output) = common::spawn_driver(
         "fs",
         Some(Path::new(CWD)),
         Path::new("update_file_system.fs_tests.log"),
