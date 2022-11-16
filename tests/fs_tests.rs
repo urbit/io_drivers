@@ -46,14 +46,11 @@ fn delete_mount_point(mount_point: &str, input: &mut ChildStdin) -> bool {
 /// Sends `%dirk` requests to the file system driver.
 #[test]
 fn commit_mount_point() {
-    let mut driver = common::spawn_driver(
+    let (mut driver, mut input, mut output) = common::spawn_driver(
         "fs",
         Some(Path::new(CWD)),
         Path::new("commit_mount_point.fs_tests.log"),
     );
-
-    let mut input = driver.0.stdin.take().unwrap();
-    let mut output = driver.0.stdout.take().unwrap();
 
     const MOUNT_POINT: &'static str = "garden";
 
@@ -115,14 +112,11 @@ fn commit_mount_point() {
 /// Sends `%ergo` requests to the file system driver.
 #[test]
 fn update_file_system() {
-    let mut driver = common::spawn_driver(
+    let (mut driver, mut input, mut output) = common::spawn_driver(
         "fs",
         Some(Path::new(CWD)),
         Path::new("update_file_system.fs_tests.log"),
     );
-
-    let mut input = driver.0.stdin.take().unwrap();
-    let mut output = driver.0.stdout.take().unwrap();
 
     const MOUNT_POINT: &'static str = "base";
 

@@ -25,7 +25,7 @@ pub(crate) fn spawn_driver(
     driver: &'static str,
     dir: Option<&Path>,
     log_file: &Path,
-) -> DriverProcess {
+) -> (DriverProcess, ChildStdin, ChildStdout) {
     // Absolute path to the binary defined by `src/main.rs`.
     const BINARY: &'static str = env!("CARGO_BIN_EXE_io_drivers");
 
@@ -34,7 +34,7 @@ pub(crate) fn spawn_driver(
     let cwd = env::current_dir().unwrap();
     let dir = dir.unwrap_or(&cwd);
 
-    DriverProcess(
+    let mut driver = DriverProcess(
         Command::new(BINARY)
             .arg(driver)
             .current_dir(dir)
@@ -44,7 +44,10 @@ pub(crate) fn spawn_driver(
             .env(LOG_VAR, log_file)
             .spawn()
             .expect("spawn io_drivers process"),
-    )
+    );
+    let input = driver.0.stdin.take().unwrap();
+    let output = driver.0.stdout.take().unwrap();
+    (driver, input, output)
 }
 
 /// Writes a request to a driver's input source.
