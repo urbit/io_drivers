@@ -336,7 +336,10 @@ impl FileSystem {
                 None => match MountPoint::new(name.clone()) {
                     Ok(mount_point) => mount_point,
                     Err(err) => {
-                        warn!("failed to create new mount point {}: {}", name, err);
+                        warn!(
+                            target: Self::name(),
+                            "failed to create new mount point {}: {}", name, err
+                        );
                         continue;
                     }
                 },
@@ -360,15 +363,20 @@ impl FileSystem {
 
     /// Handles an [`UpdateFileSystem`] request.
     fn update_file_system(&mut self, req: UpdateFileSystem) {
-        let mount_point = match self.mount_points.get_mut(&req.mount_point) {
+        let name = req.mount_point;
+        let mut mount_point = match self.mount_points.remove(&name) {
             Some(mount_point) => mount_point,
-            None => {
-                info!(
-                    target: Self::name(),
-                    "mount point {} is not actively mounted", req.mount_point
-                );
-                return;
-            }
+            // Create a new mount point if the driver doesn't recognize the mount point name.
+            None => match MountPoint::new(name.clone()) {
+                Ok(mount_point) => mount_point,
+                Err(err) => {
+                    warn!(
+                        target: Self::name(),
+                        "failed to create new mount point {}: {}", name, err
+                    );
+                    return;
+                }
+            },
         };
 
         for change in req.changes {
@@ -392,7 +400,7 @@ impl FileSystem {
                         Err(err) => {
                             warn!(
                                 target: Self::name(),
-                                "failed to update: {}: {}",
+                                "failed to update {}: {}",
                                 path.display(),
                                 err
                             );
@@ -419,6 +427,8 @@ impl FileSystem {
                 }
             }
         }
+
+        self.mount_points.insert(name, mount_point);
     }
 }
 
@@ -461,8 +471,8 @@ macro_rules! impl_driver {
                             Ok(Request::DeleteMountPoint(req)) => self.delete_mount_point(req),
                             Ok(Request::ScanMountPoints(req)) => self.scan_mount_points(req),
                             Ok(Request::UpdateFileSystem(req)) => self.update_file_system(req),
-                            _ => {
-                                warn!(target: Self::name(), "skipping unidentifiable request");
+                            Err(err) => {
+                                warn!(target: Self::name(), "skipping unidentifiable request: {}", err);
                             }
                         }
                     }
