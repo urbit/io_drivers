@@ -89,13 +89,12 @@ fn assert_change(change: &Noun, expected_path: &[&str], expected_contents: Optio
     }
 }
 
-/// Compares the contents of a [`File`] to a [`&str`], returning `true` if the [`File`] contents
-/// and the [`&str`] are identical and `false` otherwise.
-fn check_file_contents(path: &Path, expected: &str) -> bool {
-    if let Ok(contents) = fs::read_to_string(path) {
-        contents == expected
-    } else {
-        false
+/// Compares the contents of a [`File`] to an expected [`&str`], panicking if the [`File`] contents
+/// differs from the expected [`&str`].
+fn assert_file_contents(path: &Path, expected: &str) {
+    match fs::read_to_string(path) {
+        Ok(contents) => assert_eq!(contents, expected),
+        Err(err) => panic!("failed to read {}: {}", path.display(), err),
     }
 }
 
@@ -198,7 +197,7 @@ fn update_file_system() {
             "    ==\n",
             "[%tang (report-vats p.bec now)]\n",
         );
-        assert!(check_file_contents(&path, CONTENTS));
+        assert_file_contents(&path, CONTENTS);
     }
 
     // Delete `gen/vats.hoon`.
