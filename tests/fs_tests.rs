@@ -25,6 +25,10 @@ const CWD: &'static str = env!("TMPDIR");
 #[cfg(target_os = "windows")]
 const CWD: &'static str = env!("TEMP");
 
+/// Number of milliseconds to sleep for after sending a request to the driver to ensure that the
+/// request is processed before examining the file system.
+const DELAY: Duration = Duration::from_millis(300);
+
 /// Compares the contents of a change to an `expected_path` and
 /// `expected_contents`, panicking if the change doesn't match `expected_path`
 /// and `expected_contents`.
@@ -107,8 +111,7 @@ fn assert_file_contents(path: &Path, expected: &str) {
 fn delete_mount_point(mount_point: &str, input: &mut ChildStdin) -> bool {
     let req = Noun::from(Cell::from(["ogre", mount_point]));
     common::write_request(input, req);
-    // Ensure the request gets processed before running the assertions.
-    thread::sleep(Duration::from_millis(100));
+    thread::sleep(DELAY);
 
     let path: PathBuf = [CWD, mount_point].iter().collect();
     !path.exists()
@@ -189,8 +192,7 @@ fn update_file_system() {
             Noun::null(),
         ]));
         common::write_request(&mut input, req);
-        // Ensure the request gets processed before running the assertions.
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(DELAY);
 
         let path: PathBuf = [CWD, MOUNT_POINT, "gen", "vats.hoon"].iter().collect();
         const CONTENTS: &'static str = concat!(
@@ -216,8 +218,7 @@ fn update_file_system() {
             Noun::null(),
         ]));
         common::write_request(&mut input, req);
-        // Ensure the request gets processed before running the assertions.
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(DELAY);
 
         let path: PathBuf = [CWD, MOUNT_POINT, "gen", "vats.hoon"].iter().collect();
         assert!(!path.exists());
