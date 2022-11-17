@@ -16,8 +16,12 @@ use std::{
 
 mod common;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 const CWD: &'static str = "/tmp";
+
+#[cfg(target_os = "macos")]
+const CWD: &'static str = env!("TMPDIR");
+
 #[cfg(target_os = "windows")]
 const CWD: &'static str = env!("TEMP");
 
