@@ -27,7 +27,7 @@ const CWD: &'static str = env!("TEMP");
 
 /// Number of milliseconds to sleep for after sending a request to the driver to ensure that the
 /// request is processed before examining the file system.
-const DELAY: Duration = Duration::from_millis(300);
+const DELAY: Duration = Duration::from_millis(500);
 
 /// Compares the contents of a change to an `expected_path` and
 /// `expected_contents`, panicking if the change doesn't match `expected_path`
