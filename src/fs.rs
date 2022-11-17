@@ -300,7 +300,7 @@ impl FileSystem {
     /// Handles a [`DeleteMountPoint`] request.
     fn delete_mount_point(&mut self, req: DeleteMountPoint) {
         // Remove the mount point from the file system.
-        if let Some(mount_point) = self.mount_point(&req.mount_point) {
+        if let Some(mount_point) = self.mount_points.remove(&req.mount_point) {
             let path = &mount_point.path;
             if let Err(err) = fs::remove_dir_all(path) {
                 warn!(
