@@ -54,15 +54,12 @@ fn send_request() {
             // We can't check the value of these headers because they aren't deterministic.
             assert!(headers.contains_key("cache-control"));
             assert!(headers.contains_key("content-length"));
+            assert!(headers.contains_key("content-security-policy"));
             assert!(headers.contains_key("date"));
             assert!(headers.contains_key("strict-transport-security"));
             assert!(headers.contains_key("vary"));
             assert!(headers.contains_key("x-frame-options"));
 
-            assert_eq!(
-                headers.get("content-security-policy"),
-                Some(&"form-action 'self'; script-src 'self'; img-src 'self' data:; default-src 'self'; base-uri 'none'; frame-ancestors 'none'"),
-            );
             assert_eq!(
                 headers.get("content-type"),
                 Some(&"text/html; charset=utf-8")
