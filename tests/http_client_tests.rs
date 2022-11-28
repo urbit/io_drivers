@@ -216,9 +216,9 @@ fn cancel_request() {
         });
 
         // Conclude that we successfully cancelled the request if we still haven't heard from the
-        // response thread in 5s.
+        // response thread in 2s.
         assert_eq!(
-            done_rx.recv_timeout(Duration::from_secs(5)),
+            done_rx.recv_timeout(Duration::from_secs(2)),
             Err(mpsc::RecvTimeoutError::Timeout),
         );
 
