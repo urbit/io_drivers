@@ -1,4 +1,4 @@
-use io_drivers::{http::client::http_client_run, Status};
+use io_drivers::{fs::fs_run, http::client::http_client_run, Status};
 use simplelog::{Config, LevelFilter, WriteLogger};
 use std::{env, fs::File};
 
@@ -22,6 +22,7 @@ fn main() -> Status {
         .expect("initialize logger");
     }
     match &driver[..] {
+        "fs" => fs_run(),
         "http-client" => http_client_run(),
         _ => Status::NoDriver,
     }

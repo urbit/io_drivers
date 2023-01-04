@@ -5,8 +5,9 @@ use noun::{
     Atom, Noun,
 };
 use std::{
+    env, fs,
     io::{Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
 };
 
@@ -20,22 +21,37 @@ impl Drop for DriverProcess {
 }
 
 /// Spawns an IO driver in a subprocess with piped `stdin` and `stdout`.
-pub(crate) fn spawn_driver(driver: &'static str, log_file: &Path) -> DriverProcess {
+pub(crate) fn spawn_driver(
+    driver: &'static str,
+    dir: Option<&Path>,
+    log_file: &Path,
+) -> (DriverProcess, ChildStdin, ChildStdout) {
     // Absolute path to the binary defined by `src/main.rs`.
     const BINARY: &'static str = env!("CARGO_BIN_EXE_io_drivers");
 
     const LOG_VAR: &'static str = "URBIT_IO_DRIVERS_LOG";
 
-    DriverProcess(
+    let cwd = env::current_dir().unwrap();
+    let dir = dir.unwrap_or(&cwd);
+    let log_file: PathBuf = [&cwd, Path::new("tests"), log_file].iter().collect();
+    if log_file.exists() {
+        fs::remove_file(&log_file).expect("remove log file");
+    }
+
+    let mut driver = DriverProcess(
         Command::new(BINARY)
             .arg(driver)
+            .current_dir(dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .env(LOG_VAR, log_file)
             .spawn()
             .expect("spawn io_drivers process"),
-    )
+    );
+    let input = driver.0.stdin.take().unwrap();
+    let output = driver.0.stdout.take().unwrap();
+    (driver, input, output)
 }
 
 /// Writes a request to a driver's input source.

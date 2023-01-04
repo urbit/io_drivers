@@ -13,13 +13,11 @@ mod common;
 /// Sends `%request` requests to the HTTP client driver.
 #[test]
 fn send_request() {
-    let mut driver = common::spawn_driver(
+    let (_driver, mut input, mut output) = common::spawn_driver(
         "http-client",
+        None,
         Path::new("send_request.http_client_tests.log"),
     );
-
-    let mut input = driver.0.stdin.take().unwrap();
-    let mut output = driver.0.stdout.take().unwrap();
 
     // This HTTP request can be replicated from the command line:
     //
@@ -174,13 +172,11 @@ fn send_request() {
 
 #[test]
 fn cancel_request() {
-    let mut driver = common::spawn_driver(
+    let (_driver, mut input, mut output) = common::spawn_driver(
         "http-client",
+        None,
         Path::new("cancel_request.http_client_tests.log"),
     );
-
-    let mut input = driver.0.stdin.take().unwrap();
-    let mut output = driver.0.stdout.take().unwrap();
 
     {
         let req_num = 1443u16;

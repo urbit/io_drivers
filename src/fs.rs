@@ -159,15 +159,7 @@ pub struct FileSystem {
 impl FileSystem {
     /// Handles a [`CommitMountPoint`] request.
     fn commit_mount_point(&mut self, req: CommitMountPoint) -> Option<Noun> {
-        // We have to remove our mount point from `self.mount_points` so that we take ownership
-        // (as opposed to having a reference).
-        let mount_point = match self.mount_points.remove(&req.mount_point) {
-            Some(mount_point) => mount_point,
-            None => {
-                info!("mount point {} is not actively mounted", req.mount_point);
-                return None;
-            }
-        };
+        let mount_point = self.mount_point(&req.mount_point)?;
 
         let (mut mount_point, old_entries) = match mount_point.scan() {
             Ok(res_tuple) => res_tuple,
@@ -307,41 +299,51 @@ impl FileSystem {
 
     /// Handles a [`DeleteMountPoint`] request.
     fn delete_mount_point(&mut self, req: DeleteMountPoint) {
-        let mount_point = match self.mount_points.remove(&req.mount_point) {
-            Some(mount_point) => mount_point,
-            None => {
-                info!("mount point {} is not actively mounted", req.mount_point);
-                return;
-            }
-        };
-
         // Remove the mount point from the file system.
-        let path = &mount_point.path;
-        if let Err(err) = fs::remove_dir_all(path) {
-            warn!(
-                target: Self::name(),
-                "failed to remove {}: {}",
-                path.display(),
-                err
-            );
+        if let Some(mount_point) = self.mount_points.remove(&req.mount_point) {
+            let path = &mount_point.path;
+            if let Err(err) = fs::remove_dir_all(path) {
+                warn!(
+                    target: Self::name(),
+                    "failed to remove {}: {}",
+                    path.display(),
+                    err
+                );
+            }
+        }
+    }
+
+    /// Retrieves a [`MountPoint`] by name from a file system driver, creating a new [`MountPoint`]
+    /// if one doesn't already exist and returning `None` if a new [`MountPoint`] couldn't be
+    /// created.
+    fn mount_point(&mut self, mount_point_name: &PathComponent) -> Option<MountPoint> {
+        // We have to remove the mount point from `self.mount_points` so that we take ownership
+        // (as opposed to having a reference).
+        match self.mount_points.remove(&mount_point_name) {
+            Some(mount_point) => Some(mount_point),
+            // Create a new mount point if the driver doesn't recognize the mount point name.
+            None => match MountPoint::new(mount_point_name.clone()) {
+                Ok(mount_point) => Some(mount_point),
+                Err(err) => {
+                    warn!(
+                        target: Self::name(),
+                        "failed to create new mount point {}: {}", mount_point_name, err
+                    );
+                    None
+                }
+            },
         }
     }
 
     /// Handles a [`ScanMountPoints`] request.
     fn scan_mount_points(&mut self, req: ScanMountPoints) {
         for name in req.mount_points {
-            let mount_point = match self.mount_points.remove(&name) {
-                Some(mount_point) => mount_point,
-                // Create a new mount point if the driver doesn't recognize the mount point name.
-                None => match MountPoint::new(name.clone()) {
-                    Ok(mount_point) => mount_point,
-                    Err(err) => {
-                        warn!("failed to create new mount point {}: {}", name, err);
-                        continue;
-                    }
-                },
-            };
-            match mount_point.scan() {
+            let mount_point = self.mount_point(&name);
+            if mount_point.is_none() {
+                continue;
+            }
+
+            match mount_point.unwrap().scan() {
                 Ok((mount_point, _old_entries)) => {
                     self.mount_points.insert(name, mount_point);
                 }
@@ -360,21 +362,28 @@ impl FileSystem {
 
     /// Handles an [`UpdateFileSystem`] request.
     fn update_file_system(&mut self, req: UpdateFileSystem) {
-        let mount_point = match self.mount_points.get_mut(&req.mount_point) {
-            Some(mount_point) => mount_point,
-            None => {
-                info!(
-                    target: Self::name(),
-                    "mount point {} is not actively mounted", req.mount_point
-                );
-                return;
-            }
-        };
+        let mount_point = self.mount_point(&req.mount_point);
+        if mount_point.is_none() {
+            return;
+        }
+        let mut mount_point = mount_point.unwrap();
 
         for change in req.changes {
             match change {
                 Change::EditFile { path, bytes } => {
                     let path: PathBuf = [&mount_point.path, &path].iter().collect();
+
+                    // Create the file's parent directory.
+                    let parent = path.parent().unwrap();
+                    if let Err(err) = fs::create_dir_all(parent) {
+                        warn!(
+                            target: Self::name(),
+                            "failed to create {}: {}",
+                            parent.display(),
+                            err,
+                        );
+                        continue;
+                    }
 
                     let new_hash = Hash::from(&bytes[..]);
                     // Don't update the file if the hash hasn't changed.
@@ -392,7 +401,7 @@ impl FileSystem {
                         Err(err) => {
                             warn!(
                                 target: Self::name(),
-                                "failed to update: {}: {}",
+                                "failed to update {}: {}",
                                 path.display(),
                                 err
                             );
@@ -419,6 +428,8 @@ impl FileSystem {
                 }
             }
         }
+
+        self.mount_points.insert(req.mount_point, mount_point);
     }
 }
 
@@ -427,7 +438,7 @@ macro_rules! impl_driver {
     ($input_src:ty, $output_sink:ty) => {
         impl Driver<$input_src, $output_sink> for FileSystem {
             fn new() -> Result<Self, Status> {
-                todo!()
+                Ok(Self { mount_points: HashMap::new() })
             }
 
             fn name() -> &'static str {
@@ -461,8 +472,8 @@ macro_rules! impl_driver {
                             Ok(Request::DeleteMountPoint(req)) => self.delete_mount_point(req),
                             Ok(Request::ScanMountPoints(req)) => self.scan_mount_points(req),
                             Ok(Request::UpdateFileSystem(req)) => self.update_file_system(req),
-                            _ => {
-                                warn!(target: Self::name(), "skipping unidentifiable request");
+                            Err(err) => {
+                                warn!(target: Self::name(), "skipping unidentifiable request: {}", err);
                             }
                         }
                     }
@@ -476,6 +487,16 @@ macro_rules! impl_driver {
 }
 
 impl_driver!(Stdin, Stdout);
+
+/// Provides an FFI-friendly interface for running the file system driver with `stdin` as the input
+/// source and `stdout` as the output sink.
+#[no_mangle]
+pub extern "C" fn fs_run() -> Status {
+    match FileSystem::new() {
+        Ok(driver) => driver.run(tokio::io::stdin(), tokio::io::stdout()),
+        Err(status) => status,
+    }
+}
 
 //==================================================================================================
 // Path Manipulation
