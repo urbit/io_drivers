@@ -42,17 +42,15 @@
 //!
 //! [Arvo]: https://developers.urbit.org/reference/arvo
 
-use crate::{atom_as_str, Driver, Status};
+use crate::{atom_as_str, Driver, Status, http::misc::HyperResponse};
 use hyper::{
-    body::{self, Bytes},
+    body,
     client::{Client, HttpConnector},
-    header,
-    http::response::Parts,
     Body, Request as HyperRequest,
 };
 use hyper_rustls::{ConfigBuilderExt, HttpsConnector, HttpsConnectorBuilder};
 use log::{debug, info, warn};
-use noun::{atom::Atom, cell::Cell, convert, Noun, Rc};
+use noun::{convert, Noun};
 use rustls::ClientConfig;
 use std::collections::HashMap;
 use tokio::{
@@ -404,78 +402,14 @@ pub extern "C" fn http_client_run() -> Status {
 }
 
 //==================================================================================================
-// Miscellaneous
-//==================================================================================================
-
-/// A response to an HTTP request.
-#[derive(Debug)]
-struct HyperResponse {
-    req_num: u64,
-    parts: Parts,
-    body: Bytes,
-}
-
-impl TryFrom<HyperResponse> for Noun {
-    type Error = header::ToStrError;
-
-    /// The resulting noun is:
-    ///
-    /// ```text
-    /// [
-    ///   <req_num>
-    ///   <status>
-    ///   <headers>
-    ///   <body>
-    /// ]
-    /// ```
-    fn try_from(resp: HyperResponse) -> Result<Self, Self::Error> {
-        let req_num = Rc::<Noun>::from(Atom::from(resp.req_num));
-        let status = Rc::<Noun>::from(Atom::from(resp.parts.status.as_u16()));
-        let null = Rc::<Noun>::from(Atom::null());
-
-        let headers = {
-            let mut headers_cell = null.clone();
-            let headers = &resp.parts.headers;
-            for key in headers.keys().map(|k| k.as_str()) {
-                let vals = headers.get_all(key);
-                let key = Rc::<Noun>::from(Atom::from(key));
-                for val in vals {
-                    let val = Rc::<Noun>::from(Atom::from(val.to_str()?));
-                    headers_cell = Rc::<Noun>::from(Cell::from([
-                        Rc::<Noun>::from(Cell::from([key.clone(), val])),
-                        headers_cell,
-                    ]));
-                }
-            }
-            headers_cell
-        };
-
-        let body = {
-            let body = resp.body.to_vec();
-            if body.is_empty() {
-                null
-            } else {
-                let body_len = Atom::from(body.len());
-                let body = Atom::from(body);
-                Rc::<Noun>::from(Cell::from([
-                    null,
-                    Rc::<Noun>::from(Cell::from([body_len, body])),
-                ]))
-            }
-        };
-
-        Ok(Noun::from(Cell::from([req_num, status, headers, body])))
-    }
-}
-
-//==================================================================================================
 // Tests
 //==================================================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hyper::http::response;
+    use hyper::{http::response, body::Bytes};
+    use noun::{Atom, Cell};
 
     /// Tests the `TryFrom<&Noun>` implementation for [`CancelRequest`].
     #[test]
